@@ -1,0 +1,250 @@
+# ---- Pakker ----
+
+library(httr)
+library(jsonlite)
+library(dplyr)
+library(purrr)
+library(tibble)
+library(stringr)
+library(readr)
+library(dplyr)
+library(tidytext)
+library(stringr)
+library(wordcloud)
+library(RColorBrewer)
+
+# ---- API grund-url ----
+
+base_url <- "https://www.dansketaler.dk/api/v1/speeches"
+
+# ---- Funktion: hent én side ----
+
+# ---- Funktion: hent én side ----
+
+hent_side <- function(side_nr) {                         # Laver en funktion, hvor side_nr er sidenummeret vi vil hente
+  svar <- GET(                                           # Sender et GET-kald til API'et
+    url = base_url,                                      # Bruger den API-url, gemt i base_url
+    query = list(                                        # Her angiver vi de ting, API'et skal søge efter
+      q = "nytårstale",                                 # Søger efter ordet "nytårstale"
+      fields = "title,circumstances,tags,transcription", # Vælger hvilke felter vi vil hente
+      per_page = 50,                                     # Henter 50 resultater pr. side
+      page = side_nr,                                    # Henter den side, som funktionen får som input
+      sort = "date",                                    # Sorterer efter dato
+      mode = "plain"                                    # Henter teksten som ren tekst
+    )
+  )
+  stop_for_status(svar)                                  # Stopper koden, hvis API-kaldet fejler
+  tekst <- content(svar, as = "text", encoding = "UTF-8") # Laver API-svaret om til tekst med danske tegn
+  data <- fromJSON(tekst, flatten = TRUE)                # Laver JSON-tekst om til R-data
+  return(data)                                           # Sender data tilbage fra funktionen
+}
+
+# ---- Test side 1 ----
+
+side1 <- hent_side(1)        # Henter side 1 fra API'et og gemmer den i objektet side1
+side1$meta                   # Viser metadata for side 1, fx antal sider og antal resultater
+
+
+# ---- Find antal sider ----
+
+antal_sider <- side1$meta$total_pages   # Finder hvor mange sider der findes i alt i API-resultatet
+antal_sider                            # Viser antal sider i konsollen
+
+# ---- Hent alle sider ----
+
+alle_sider <- map(1:antal_sider, hent_side)   # Kører funktionen hent_side på alle sider fra 1 til antal_sider
+
+# ---- Saml alle taler ----
+
+nytårstaler_raw <- map_dfr(alle_sider, function(x) {   # Går igennem hver side i alle_sider og samler dem til én dataframe
+  as_tibble(x$speeches)                                # Tager speeches-delen fra hver side og laver den om til en tibble
+})                                                     # Afslutter funktionen inde i map_dfr
+
+# ---- Se data ----
+
+glimpse(nytårstaler_raw)
+
+# ---- Rens data ----
+
+nytårstaler <- nytårstaler_raw %>%
+  mutate(
+    year = date.year,
+    date = date.iso_date,
+    title = str_squish(title),
+    transcription = str_squish(transcription)
+  ) %>%
+  select(
+    id,
+    title,
+    date,
+    year,
+    url,
+    language,
+    location,
+    circumstances,
+    transcription
+  )
+
+# ---- Se resultat ----
+
+nytårstaler
+
+# ---- Gem som CSV ----
+
+write_csv(
+  nytårstaler,
+  "nytaarstaler_dansketaler.csv"
+)
+
+# ---- Filtrer for Anker Jørgensen ----
+
+Anker <- nytårstaler %>%
+  filter(title == "Anker Jørgensens nytårstale")
+
+# ---- Danske stopord ----
+
+danske_stopord <- data.frame(
+  word = c(
+    "ad", "af", "akkurat", "al", "aldrig", "alene", "alle", "allerede",
+    "alligevel", "alt", "altid", "altså", "anden", "andet", "andre",
+    "art", "at", "bag", "bare", "begge", "bl.a.", "blandt", "blev",
+    "blive", "bliver", "blot", "bringe", "brug", "burde", "både",
+    "bør", "ca.", "da", "dag", "de", "del", "dem", "den", "denne",
+    "dens", "der", "derefter", "deres", "derfor", "derfra", "deri",
+    "dermed", "derpå", "derved", "des", "desto", "det", "dets",
+    "dette", "dig", "din", "dine", "disse", "dit", "dog", "du",
+    "dér", "dét", "efter", "egen", "ej", "eller", "ellers", "en",
+    "end", "endelig", "endnu", "ene", "eneste", "enhver", "ens",
+    "enten", "er", "et", "f.eks.", "faktisk", "far", "fat", "fem",
+    "fik", "find", "finde", "fire", "flere", "flest", "fleste",
+    "for", "foran", "fordi", "forrige", "fortsat", "fra", "fx",
+    "få", "får", "følg", "følge", "følger", "før", "først",
+    "første", "gang", "gennem", "gerne", "gid", "giv", "giver",
+    "givet", "gjorde", "gjort", "god", "godt", "gå", "går", "gør",
+    "gøre", "gørende", "ha", "haft", "ham", "han", "hans", "har",
+    "havde", "have", "hej", "hel", "heldigvis", "hele", "heller",
+    "helst", "helt", "hen", "hende", "hendes", "henover", "her",
+    "herefter", "heri", "hermed", "herpå", "holder", "hos", "hun",
+    "hvad", "hvem", "hver", "hvert", "hvilke", "hvilken", "hvilkes",
+    "hvis", "hvor", "hvordan", "hvorefter", "hvorfor", "hvorfra",
+    "hvorhen", "hvori", "hvorimod", "hvornår", "hvorved", "hør",
+    "hører", "hørt", "hørte", "i", "igen", "igennem", "ikke",
+    "imellem", "imens", "imod", "ind", "indtil", "ingen", "intet",
+    "især", "iøvrigt", "ja", "jeg", "jer", "jeres", "jo", "kan",
+    "kom", "komme", "kommer", "kommet", "kun", "kunne", "lad",
+    "langs", "lav", "lave", "lavet", "lidt", "lig", "lige",
+    "ligesom", "ligeså", "ligge", "ligger", "lille", "lissom",
+    "længere", "man", "mand", "mange", "med", "meget", "mellem",
+    "men", "mens", "mere", "mest", "mig", "min", "mindre", "mindst",
+    "mine", "mit", "mod", "må", "måske", "måtte", "måttet", "ned",
+    "nej", "nemlig", "netop", "ni", "nogen", "nogensinde", "noget",
+    "nogle", "nok", "nu", "ny", "nye", "nyt", "nå", "når", "nær",
+    "næste", "næsten", "og", "også", "okay", "om", "omkring", "op",
+    "os", "otte", "over", "overalt", "overhovedet", "pga.", "på",
+    "ret", "rigt", "ro", "rundt", "sagt", "samme", "sammen", "se",
+    "seks", "selv", "selvom", "senere", "ser", "ses", "set", "siden",
+    "sig", "sige", "siger", "simpelthen", "sin", "sine", "sit",
+    "skal", "skam", "ske", "sker", "skulle", "små", "småt", "snart",
+    "som", "stadig", "stor", "store", "stort", "synes", "syntes",
+    "syv", "så", "sådan", "således", "såmænd", "såvel", "særlig",
+    "tag", "tage", "temmelig", "thi", "ti", "tidligere", "til",
+    "tilbage", "tit", "to", "tre", "tæt", "ud", "ude", "uden",
+    "udover", "under", "undtagen", "var", "ved", "vel", "vi", "via",
+    "videre", "vil", "ville", "vis", "vise", "vist", "vor", "vore",
+    "vores", "vort", "vær", "være", "været", "véd", "år", "års",
+    "én", "ét", "øvrigt"
+  ),
+  stringsAsFactors = FALSE
+)
+
+# ---- Top 5 ord uden stopord ----
+
+top5_anker <- Anker %>%
+  unnest_tokens(word, transcription) %>% # splitter alle ord om til vektorer
+  filter(!is.na(word)) %>% # Fjerne alle NA
+  filter(str_length(word) > 2) %>% # Fjerne alle små ord "i, at, må"
+  anti_join(danske_stopord, by = "word") %>% # Fjern alle ord, som findes i danske_stopord.
+  filter(word != "nbsp") %>% # Fjerner nbsp som betyder non-breaking space = et mellemrum, som ikke må brydes.
+  count(word, sort = TRUE) %>% # Tæl hvor mange gange hvert ord findes, og sortér med det mest brugte ord øverst.
+  slice_head(n = 5) # find top 5 ord 
+
+# ---- Se resultat ----
+
+top5_anker
+
+
+# ---- Filtrer for Anders Fogh Rasmussen ----
+
+Fog <- nytårstaler %>%
+  filter(title == "Anders Fogh Rasmussens nytårstale")
+
+# ---- Top 5 ord uden stopord Anders Fogh Rasmussen ----
+
+top5_fog <- Fog %>%
+  unnest_tokens(word, transcription) %>% # splitter alle ord om til vektorer
+  filter(!is.na(word)) %>% # Fjerne alle NA
+  filter(str_length(word) > 2) %>% # Fjerne alle små ord "i, at, må"
+  anti_join(danske_stopord, by = "word") %>% # Fjern alle ord, som findes i danske_stopord.
+  filter(word != "nbsp") %>% # Fjerner nbsp som betyder non-breaking space = et mellemrum, som ikke må brydes.
+  count(word, sort = TRUE) %>% # Tæl hvor mange gange hvert ord findes, og sortér med det mest brugte ord øverst.
+  slice_head(n = 5) # find top 5 ord 
+
+# ---- Se resultat ----
+
+top5_fog
+
+# ---- Ordtabel for Anker Jørgensen # fjernet slice ikke kun at tage top 5 ----
+
+ord_anker <- Anker %>%
+  unnest_tokens(word, transcription) %>% # splitter alle ord om til vektorer
+  filter(!is.na(word)) %>% # Fjerne alle NA
+  filter(str_length(word) > 2) %>% # Fjerne alle små ord "i, at, må"
+  filter(word != "nbsp") %>% # Fjerner nbsp som betyder non-breaking space = et mellemrum, som ikke må brydes.
+  anti_join(danske_stopord, by = "word") %>% # Fjern alle ord, som findes i danske_stopord.
+  count(word, sort = TRUE) # Tæl hvor mange gange hvert ord findes, og sortér med det mest brugte ord øverst.
+
+head(ord_anker)
+
+# ---- Wordcloud for Anker Jørgensen ----
+
+wordcloud(
+  words = ord_anker$word,
+  freq = ord_anker$n,
+  max.words = 100,
+  random.order = FALSE,
+  colors = brewer.pal(8, "Dark2")
+)
+
+# ---- Ordtabel for Anders Fogh Rasmussen - fjernet slice ikke kun at tage top 5 ----
+
+ord_fog <- Fog %>%
+  unnest_tokens(word, transcription) %>% # splitter alle ord om til vektorer
+  filter(!is.na(word)) %>% # Fjerne alle NA
+  filter(str_length(word) > 2) %>% # Fjerne alle små ord "i, at, må"
+  filter(word != "nbsp") %>% # Fjerner nbsp som betyder non-breaking space = et mellemrum, som ikke må brydes.
+  anti_join(danske_stopord, by = "word") %>% # Fjern alle ord, som findes i danske_stopord.
+  count(word, sort = TRUE) # Tæl hvor mange gange hvert ord findes, og sortér med det mest brugte ord øverst.
+
+head(ord_fog)
+
+# ---- Wordcloud for Anker Jørgensen ----
+
+wordcloud(
+  words = ord_fog$word,
+  freq = ord_fog$n,
+  max.words = 100,
+  random.order = FALSE,
+  colors = brewer.pal(8, "Dark2")
+)
+
+# --- Anders Fog fortolkning ----
+
+# Anders Fogh Rasmussens nytårstaler har et stærkt fokus på Danmark, det danske samfund, ansvar og frihed. 
+# Ordene peger på en politisk fortælling om nationalt fællesskab, borgerligt ansvar og forbedring af samfundet. 
+# “Frihed” og “ansvar” passer godt sammen som centrale borgerlige værdier.
+
+# --- Anker Jørgensen fortolkning ----
+
+# Anker Jørgensens nytårstaler har et tydeligt fokus på økonomiske udfordringer, kriser og internationale forhold. 
+# Ordene “økonomiske”, “problemer” og “krise” viser, at hans taler ofte handler om samfundets vanskeligheder og behovet for politisk handling. 
+# Samtidig viser ord som “samarbejde”, “samfund” og “demokratiet”, at han lægger vægt på fællesskab og kollektive løsninger.

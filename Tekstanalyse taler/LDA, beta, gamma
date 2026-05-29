@@ -1,0 +1,72 @@
+alle <- read.csv("alle.csv")
+
+df_anker <- alle$Speakers.name == "Anker Jørgensen"
+df_anker <- alle %>%
+  filter(Speakers.name == "Anker Jørgensen")
+
+
+
+df_anker_nytaar <- df_anker %>%
+  filter(str_detect(Title, "nytårstale"))
+
+df_fogh <- alle$Speakers.name == "Anders Fogh Rasmussen"
+df_fogh <- alle %>%
+  filter(Speakers.name == "Anders Fogh Rasmussen")
+
+df_fogh_nytaar <- df_fogh %>%
+  filter(str_detect(Title, "nytårstale"))
+
+corpus_anker <- VCorpus(VectorSource(df_anker_nytaar$Transcription))
+
+
+custom_stopwords <- c("kan", "ved", "derfor", "andre", "erne")
+
+
+corpus_anker <- corpus_anker %>%
+  tm_map(content_transformer(tolower)) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removeWords, c(stopwords("danish"), custom_stopwords)) %>%
+  tm_map(stripWhitespace)
+
+dtm_anker <- DocumentTermMatrix(corpus_anker)
+
+dtm_anker <- removeSparseTerms(dtm_anker, 0.99)
+
+lda_anker <- LDA(dtm_anker, k = 2, control = list(seed = 1234))
+
+topics_anker <- tidy(lda_anker, matrix = "beta")
+
+top_terms_anker <- topics_anker %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>%
+  ungroup()
+
+top_terms_anker %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_x_reordered() +
+  coord_flip() +
+  labs(
+    title = "Anker Jørgensen – LDA topics",
+    x = "Ord",
+    y = "Beta"
+  ) +
+  theme_minimal()
+
+gamma_anker <- tidy(lda_anker, matrix = "gamma")
+
+ggplot(gamma_anker,
+       aes(x = factor(topic),
+           y = gamma,
+           fill = factor(topic))) +
+  geom_col() +
+  facet_wrap(~ document) +
+  labs(
+    title = "Topic-fordeling pr. tale anker",
+    x = "Topic",
+    y = "Gamma"
+  ) +
+  theme_minimal()

@@ -1,1 +1,26 @@
-.
+install.packages("gutenbergr")
+library(gutenbergr)
+
+gutmeta <- gutenberg_metadata
+
+# ---- Lav efternavn og tæl pr. unik forfatter ----
+
+gutmeta <- gutmeta %>%
+  mutate(
+    efternavn = str_extract(author, "^[^,]+")
+  )
+
+forfatter_count <- gutmeta %>%
+  count(gutenberg_author_id, author, efternavn, sort = TRUE)
+
+forfatter_count
+
+gutmeta %>%
+  count(efternavn, sort = TRUE)
+
+lincoln <- gutmeta %>%
+  filter(author == "Lincoln, Abraham")
+
+lincoln_text <- gutenberg_download(4)
+
+save.image("Gutenberg")

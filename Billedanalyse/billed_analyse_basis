@@ -1,0 +1,126 @@
+## Billeder i R ###
+
+# Pakker
+install.packages("jpeg")
+install.packages("imager")
+
+library(jpeg)
+library(imager)
+
+# Hente filnavne
+
+
+lego_files <- list.files("C:/Users/mehdi/Documents/Dataanalyse 2 semester/Valgfag NLP/Uge 17/Tirsdag - Billeder i R/Lego", full.names = TRUE)
+
+no_lego_files <- list.files("C:/Users/mehdi/Documents/Dataanalyse 2 semester/Valgfag NLP/Uge 17/Tirsdag - Billeder i R/No_Lego", full.names = TRUE)
+
+length(lego_files)
+length(no_lego_files)
+
+## Labels = 1 Lego 
+
+lego_labels <- rep(1, length(lego_files))
+no_lego_labels <- rep(0, length(no_lego_files))
+
+# Samler data (X billeder, y labels)
+
+all_files <- c(lego_files, no_lego_files)
+all_labels <- c(lego_labels, no_lego_labels)
+
+
+# resize
+
+library(jpeg)
+library(imager)
+
+process_image <- function(path) {
+  img <- load.image(path)
+  img <- resize(img, 64, 64)
+  
+  # konverter til array
+  img_array <- as.array(img)
+  
+  # flatten (gør til vektor)
+  img_vector <- as.vector(img_array)
+  
+  return(img_vector)
+}
+
+## Anvend på billederne
+
+X <- lapply(all_files, process_image)
+X <- do.call(rbind, X) # X lavet om til matrix
+
+## Rækker = billeder
+## Kolonner = pixel værdier
+
+## kigger på et billed statitsitk
+
+img <- process_image(all_files[1])
+
+summary(img)
+
+## sammenlign lego vs no_lego
+
+lego_sample <- process_image(lego_files[1])
+no_lego_sample <- process_image(no_lego_files[1])
+
+mean(lego_sample)
+mean(no_lego_sample)
+
+## Fordeling
+
+hist(lego_sample, main="Lego pixel values")
+hist(no_lego_sample, main="No Lego pixel values")
+
+## Gennemsnit for alle billeder
+
+lego_means <- sapply(lego_files, function(x) mean(process_image(x)))
+no_lego_means <- sapply(no_lego_files, function(x) mean(process_image(x)))
+
+mean(lego_means)
+mean(no_lego_means)
+
+#### Tekst
+
+"LEGO-billeder er i gennemsnit MERE lyse end No_Lego"
+
+"LEGO:
+  Peak omkring 0.6–0.7
+Nogle meget lave værdier (de mørke pixels fra klodsen)
+
+NO LEGO:
+  Mere centreret omkring 0.58–0.62
+Mere “smooth” fordeling"
+
+
+
+
+## Cluster
+
+# går fra fx 12.000 features  2
+
+# PCA reducerer mange pixel-features til få dimensioner
+pca <- prcomp(X, center = TRUE, scale. = TRUE)
+
+# tager kun de 2 første komponenter (så vi kan plotte)
+X_pca <- pca$x[, 1:2]
+
+# K means
+
+set.seed(123)  # så du får samme resultat hver gang
+
+# modellen finde 2 grupper (fordi vi har 2 klasser)
+kmeans_result <- kmeans(X_pca, centers = 2)
+
+# plot
+
+plot(X_pca,
+     col = kmeans_result$cluster,
+     pch = 19,
+     main = "K-means clustering af billeder")
+
+y <- all_labels
+
+table(kmeans_result$cluster, y)
+

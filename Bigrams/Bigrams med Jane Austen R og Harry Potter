@@ -1,0 +1,296 @@
+# ---- Installer pakker ----
+install.packages("igraph")
+install.packages("ggraph")
+
+# ---- Pakker ----
+library(igraph)
+library(ggraph)
+library(tidytext)
+library(pdftools)
+library(dplyr)
+library(widyr)
+library(janeaustenr)
+
+janebooks <- austen_books()
+View(janebooks)
+hpworks <- pdf_text("harrypotter.pdf")
+hpworksdf <- as.data.frame(hpworks)
+View(hpworksdf)
+
+hpfilter <- hpworksdf %>% filter(str_detect(hpworks,"CONTENT"))
+View(hpfilter)
+
+hpworksdf <- hpworksdf %>% mutate(
+  book = str_extract(hpworks,"CONTENTS"))
+View(hpworksdf)
+
+# ---- Lav data med row_id ----
+hp_check <- hpworksdf %>%
+  mutate(
+    row_id = row_number(),
+    text = str_squish(hpworks)
+  )
+
+# ---- Se data med rækkenumre ----
+View(hp_check)
+
+# ---- Find mulige bogstarter ----
+hp_check %>%
+  filter(str_detect(text, regex("CHAPTER ONE|THE BOY WHO LIVED|THE WORST BIRTHDAY|OWL POST|THE RIDDLE HOUSE", ignore_case = TRUE))) %>%
+  select(row_id, text) %>%
+  View()
+
+# ---- Start-rækker ----
+bog1_start <- 12     # Sorcerer's Stone
+bog2_start <- 282    # Chamber of Secrets
+bog3_start <- 573    # Prisoner of Azkaban
+bog4_start <- 949    # Goblet of Fire
+bog5_start <- 1570   # Order of the Phoenix
+bog6_start <- 2415   # Half-Blood Prince
+bog7_start <- 2976   # Deathly Hallows
+
+# ---- Lav Harry Potter data med book og text ----
+hp_clean <- hpworksdf %>%
+  mutate(
+    row_id = row_number(),
+    text = str_squish(hpworks)
+  ) %>%
+  filter(text != "") %>%
+  filter(!str_detect(text, "^CONTENTS")) %>%
+  mutate(
+    book = case_when(
+      row_id >= bog1_start & row_id < bog2_start ~ "Sorcerer's Stone",
+      row_id >= bog2_start & row_id < bog3_start ~ "Chamber of Secrets",
+      row_id >= bog3_start & row_id < bog4_start ~ "Prisoner of Azkaban",
+      row_id >= bog4_start & row_id < bog5_start ~ "Goblet of Fire",
+      row_id >= bog5_start & row_id < bog6_start ~ "Order of the Phoenix",
+      row_id >= bog6_start & row_id < bog7_start ~ "Half-Blood Prince",
+      row_id >= bog7_start ~ "Deathly Hallows",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(book)) %>%
+  select(book, text)
+
+# ---- Tjek resultat ----
+hp_clean %>%
+  count(book)
+
+# ---- Tjek første tekstlinje pr. bog ----
+hp_clean %>%
+  group_by(book) %>%
+  slice_head(n = 1) %>%
+  View()
+
+# ---- Jane Austen ----
+jsss <- janebooks %>%
+  filter(book == "Sense & Sensibility")
+
+# ---- Words ----
+jsswords <- jsss %>%
+  unnest_tokens(words, text, token = "words")
+
+jsswordscount <- jsswords %>%
+  count(words, sort = TRUE)
+
+stweng <- stop_words
+
+# ---- Bigrams ----
+jssbigrams <- jsss %>%
+  unnest_tokens(bigrams, text, token = "ngrams", n = 2)
+
+jssbigrams <- jssbigrams %>%
+  separate(bigrams, c("w1", "w2"))
+
+# ---- Filter på gender: He / She ----
+flist <- c("He", "he", "She", "she")
+
+jssbigramsGender <- jssbigrams %>%
+  filter(w1 %in% flist)
+jssbigramsGenderCound <- jssbigramsGender %>% group_by(w1) %>% count(w2)
+View(jssbigramsGenderCound)
+
+
+# ---- Tæl bigrams efter he og she ----
+
+jssbigramsGenderCount <- jssbigrams %>%
+  count(w1, w2, sort = TRUE)
+
+# ---- Del op i he og she ----
+
+dfm <- jssbigramsGenderCount %>%
+  filter(w1 == "he")
+
+dff <- jssbigramsGenderCount %>%
+  filter(w1 == "she")
+
+# ---- Find fælles ord efter he og she ----
+
+common <- inner_join(dfm, dff, by = "w2")
+
+commony <- unlist(common[, "w2"])
+
+# ---- Behold kun fælles ord ----
+
+jssbigramsGenderCountCommon <- jssbigramsGenderCount %>%
+  filter(w2 %in% commony)
+
+# ---- Filtrer til ord der bruges mere end 10 gange ----
+
+plojss <- jssbigramsGenderCountCommon %>%
+  filter(n > 10)
+
+# ---- Plot ----
+
+ggplot(plojss, aes(x = reorder(w2, n), y = n, fill = as.factor(w1))) +
+  geom_bar(stat = "identity", position = "dodge") +
+  coord_flip()
+
+plotgender <- jssbigramsGenderCountCommon %>%
+  filter(n > 10) %>%
+  graph_from_data_frame()
+
+ggraph(plotgender, layout = "fr") +
+  geom_edge_link() +
+  geom_node_point() +
+  geom_node_text(aes(label = name))
+
+# ---- Pakker ----
+library(dplyr)
+library(tidytext)
+library(tidyr)
+library(ggplot2)
+library(igraph)
+library(ggraph)
+
+# ---- Harry Potter: Order of the Phoenix ----
+hp <- hp_clean %>%
+  filter(book == "Order of the Phoenix")
+
+# ---- Words ----
+hpwords <- hp %>%
+  unnest_tokens(words, text, token = "words")
+
+hpwordscount <- hpwords %>%
+  count(words, sort = TRUE)
+
+stweng <- stop_words
+
+# ---- Bigrams ----
+hpbigrams <- hp %>%
+  unnest_tokens(bigrams, text, token = "ngrams", n = 2)
+
+hpbigrams <- hpbigrams %>%
+  separate(bigrams, c("w1", "w2"))
+
+# ---- Filter på Harry og Hermione ----
+flist <- c("harry", "hermione")
+
+hpbigramsCharacter <- hpbigrams %>%
+  filter(w1 %in% flist)
+
+hpbigramsCharacterCount <- hpbigramsCharacter %>%
+  group_by(w1) %>%
+  count(w2, sort = TRUE)
+
+View(hpbigramsCharacterCount)
+
+# ---- Tæl bigrams efter Harry og Hermione ----
+hpbigramsCharacterCount <- hpbigramsCharacter %>%
+  count(w1, w2, sort = TRUE)
+
+# ---- Del op i Harry og Hermione ----
+dfh <- hpbigramsCharacterCount %>%
+  filter(w1 == "harry")
+
+dfher <- hpbigramsCharacterCount %>%
+  filter(w1 == "hermione")
+
+# ---- Find fælles ord efter Harry og Hermione ----
+common <- inner_join(dfh, dfher, by = "w2")
+
+commony <- unlist(common[, "w2"])
+
+# ---- Behold kun fælles ord ----
+hpbigramsCharacterCountCommon <- hpbigramsCharacterCount %>%
+  filter(w2 %in% commony)
+
+# ---- Filtrer til ord der bruges mere end 10 gange ----
+plohp <- hpbigramsCharacterCountCommon %>%
+  filter(n > 10)
+
+# ---- Plot ----
+ggplot(plohp, aes(x = reorder(w2, n), y = n, fill = as.factor(w1))) +
+  geom_bar(stat = "identity", position = "dodge") +
+  coord_flip()
+
+# ---- Netværksplot ----
+plotcharacter <- hpbigramsCharacterCountCommon %>%
+  filter(n > 10) %>%
+  graph_from_data_frame()
+
+ggraph(plotcharacter, layout = "fr") +
+  geom_edge_link() +
+  geom_node_point() +
+  geom_node_text(aes(label = name))
+
+
+# ---- Lav words ----
+hp_words <- hp %>%
+  unnest_tokens(word, text)
+
+# ---- Word count for Harry og Hermione ----
+harry_hermione_count <- hp_words %>%
+  filter(word %in% c("harry", "hermione")) %>%
+  count(word, sort = TRUE)
+
+# ---- Se resultat ----
+View(harry_hermione_count)
+
+# ---- Plot ----
+ggplot(harry_hermione_count, aes(x = word, y = n)) +
+  geom_col() +
+  labs(
+    title = "Word count: Harry og Hermione",
+    x = "Person",
+    y = "Antal gange nævnt"
+  )
+
+# ---- Lav bigrams ----
+hp_bigrams <- hp %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2)
+
+# ---- Del bigrams op i to ord ----
+hp_bigrams <- hp_bigrams %>%
+  separate(bigram, c("person", "word"))
+
+# ---- Top 10 ord efter Harry og Hermione ----
+top10_person_words <- hp_bigrams %>%
+  filter(person %in% c("harry", "hermione")) %>%
+  anti_join(stop_words, by = c("word" = "word")) %>%
+  filter(!word %in% c("s", "Potter","potter","granger")) %>%
+  count(person, word, sort = TRUE) %>%
+  group_by(person) %>%
+  slice_max(n, n = 10) %>%
+  ungroup()
+
+# ---- resultat ----
+View(top10_person_words)
+
+# ---- Sorter ord ----
+top10_person_words <- top10_person_words %>%
+  arrange(person, n) %>%
+  mutate(word = factor(word, levels = unique(word)))
+
+# ---- Plot med top 10 ----
+ggplot(top10_person_words, aes(x = reorder_within(word, n, person), y = n, fill = person)) +
+  geom_col(show.legend = TRUE) +
+  coord_flip() +
+  facet_wrap(~ person, scales = "free_y") +
+  scale_x_reordered() +
+  labs(
+    title = "Top 10 ord efter Harry og Hermione uden stopord",
+    x = "Ord",
+    y = "Antal"
+  )
+save.image("BBC_FOX_Word_Count")

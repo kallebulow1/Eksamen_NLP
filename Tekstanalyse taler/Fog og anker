@@ -1,0 +1,162 @@
+# ---- Pakker ----
+
+library(httr)        # Bruges til API-kald
+library(jsonlite)    # Bruges til JSON-data
+library(dplyr)       # Bruges til databehandling
+library(purrr)       # Bruges til map-funktioner
+library(tibble)      # Bruges til pæne dataframes
+library(stringr)     # Bruges til tekst-rensning
+library(tidytext)    # Bruges til at splitte tekst til ord
+library(ggplot2)     # Bruges til grafer
+library(topicmodels) # Bruges til LDA
+library(Sentida)     # Bruges til sentimentanalyse
+
+# ---- Stopord ----
+
+data("stop_words")   # Henter indbyggede stopord fra tidytext
+
+danske_stopord <- stop_words %>%
+  filter(lexicon == "snowball") %>%  # Vælger snowball-stopord
+  select(word)                        # Beholder kun ord-kolonnen
+
+# ---- API ----
+
+base_url <- "https://www.dansketaler.dk/api/v1/speeches"
+
+# Funktionen henter én side fra API'et
+hent_side <- function(side_nr) {
+  
+  svar <- httr::GET(
+    url = base_url,
+    query = list(
+      q = "nytårstale",                              # Søger efter nytårstaler
+      fields = "title,circumstances,tags,transcription", # Vælger felter
+      per_page = 50,                                 # Henter 50 taler pr. side
+      page = side_nr,                                # Vælger sidenummer
+      sort = "date",                                 # Sorterer efter dato
+      mode = "plain"                                 # Henter ren tekst
+    )
+  )
+  
+  httr::stop_for_status(svar) # Stopper hvis API-kald fejler
+  
+  tekst <- httr::content(
+    svar,
+    as = "text",
+    encoding = "UTF-8"
+  )
+  data <- jsonlite::fromJSON(
+    tekst,
+    flatten = TRUE
+  )
+  return(data)
+}
+
+# ---- Hent taler ----
+
+side1 <- hent_side(1) # Henter første side for at finde antal sider
+
+nytårstaler <- 1:side1$meta$total_pages %>%
+  map(~ hent_side(.x)$speeches) %>%     # Henter speeches fra alle sider
+  map_dfr(as_tibble) %>%                # Samler alle sider til én dataframe
+  mutate(
+    year = date.year,                   # Laver år-kolonne
+    title = str_squish(title),          # Fjerner ekstra mellemrum i titel
+    transcription = str_squish(transcription) # Fjerner ekstra mellemrum i tekst
+  ) %>%
+  select(
+    id,
+    title,
+    year,
+    transcription
+  )
+
+# ---- Vælg Anker og Fogh ----
+
+taler <- nytårstaler %>%
+  filter(
+    title %in% c(
+      "Anker Jørgensens nytårstale",
+      "Anders Fogh Rasmussens nytårstale"
+    )
+  ) %>%
+  mutate(
+    person = ifelse(
+      title == "Anker Jørgensens nytårstale",
+      "Anker Jørgensen",
+      "Anders Fogh Rasmussen"
+    )
+  )
+
+# ---- Rens ord ----
+
+ord_data <- taler %>%
+  unnest_tokens(word, transcription) %>%       # Splitter tekst til ét ord pr. række
+  filter(str_length(word) > 2, word != "nbsp") %>% # Fjerner korte ord og html-skrald
+  anti_join(danske_stopord, by = "word")       # Fjerner stopord
+
+# ---- Top 5 ord ----
+
+top5_ord <- ord_data %>%
+  count(person, word, sort = TRUE) %>% # Tæller ord pr. person
+  group_by(person) %>%                 # Grupperer efter person
+  slice_head(n = 5)                    # Finder top 5 ord pr. person
+
+top5_ord
+
+# ---- Sentiment ----
+
+sentiment_data <- taler %>%
+  rowwise() %>% # Gør at Sentida køres én tale ad gangen
+  mutate(
+    sentiment_score = sentida(
+      transcription,
+      output = "mean"
+    )
+  ) %>%
+  ungroup()
+
+# Plotter sentiment over tid
+ggplot(sentiment_data, aes(x = year, y = sentiment_score, fill = person)) +
+  geom_col() +
+  facet_wrap(~ person)
+
+# ---- LDA ----
+
+lav_lda <- function(data) {
+  
+  # Laver document-term matrix
+  dtm <- data %>%
+    count(id, word) %>%
+    cast_dtm(id, word, n)
+  
+  # Kører LDA med 2 emner
+  model <- LDA(
+    dtm,
+    k = 2,
+    control = list(seed = 123)
+  )
+  
+  # Finder de 10 vigtigste ord pr. emne
+  beta <- tidy(model, matrix = "beta") %>%
+    group_by(topic) %>%
+    slice_max(beta, n = 10)
+  
+  return(beta)
+}
+
+# ---- LDA samlet ----
+
+samlet_beta <- ord_data %>%
+  group_by(person) %>%      # Deler data efter person
+  group_split() %>%         # Laver en liste med én dataframe pr. person
+  map_dfr(
+    ~ lav_lda(.x) %>%
+      mutate(person = unique(.x$person))
+  )
+
+# Plotter LDA-emner
+ggplot(samlet_beta, aes(x = reorder(term, beta), y = beta, fill = factor(topic))) +
+  geom_col() +
+  coord_flip() +
+  facet_wrap(~ person + topic, scales = "free")

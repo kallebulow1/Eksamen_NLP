@@ -1,0 +1,294 @@
+# PROBLEMET VI LØSER
+# Vi har 36 billeder — halvdelen med en Lego-klods på et bord, 
+# halvdelen bare et bord. Spørgsmålet er: Kan en computer selv lære at skelne mellem dem?
+
+
+
+
+# -------------------------
+# CNN - Lego vs No_Lego
+# -------------------------
+library(tensorflow)
+library(keras3)
+library(reticulate)
+library(jpeg)
+library(tidyverse)
+
+np <- import("numpy")
+
+# -------------------------
+# Paths
+# -------------------------
+lego_dir    <- "C:/Users/mehdi/Documents/Dataanalyse 2 semester/Valgfag NLP/Uge 17/Tirsdag - Billeder i R/Lego"
+no_lego_dir <- "C:/Users/mehdi/Documents/Dataanalyse 2 semester/Valgfag NLP/Uge 17/Tirsdag - Billeder i R/No_Lego"
+
+lego_files    <- list.files(lego_dir,    full.names = TRUE)
+no_lego_files <- list.files(no_lego_dir, full.names = TRUE)
+
+cat("Lego billeder:",    length(lego_files),    "\n")
+cat("No_Lego billeder:", length(no_lego_files), "\n")
+
+# -------------------------
+# 1. Vis billeder med labels
+# -------------------------
+par(mar = c(0, 0, 2, 0), mfrow = c(3, 6))
+for (i in 1:min(9, length(lego_files))) {
+  img <- readJPEG(lego_files[i])
+  plot(as.raster(img))
+  title(paste("LEGO", i), col.main = "blue")
+}
+for (i in 1:min(9, length(no_lego_files))) {
+  img <- readJPEG(no_lego_files[i])
+  plot(as.raster(img))
+  title(paste("NO LEGO", i), col.main = "red")
+}
+
+# -------------------------
+# 2. Load og preprocess billeder
+# -------------------------
+load_image <- function(path) {
+  img       <- image_load(path, target_size = c(64, 64))
+  arr       <- image_to_array(img)
+  arr       <- arr / 255  # normaliser
+  return(arr)
+}
+
+lego_arrays    <- lapply(lego_files,    load_image)
+no_lego_arrays <- lapply(no_lego_files, load_image)
+
+# Kombiner til ét array
+all_arrays <- c(lego_arrays, no_lego_arrays)
+X <- array(unlist(all_arrays), dim = c(length(all_arrays), 64, 64, 3))
+y <- c(rep(1, length(lego_files)), rep(0, length(no_lego_files)))
+
+cat("X shape:", dim(X), "\n")
+cat("Lego (1):", sum(y == 1), "| No_Lego (0):", sum(y == 0), "\n")
+
+# -------------------------
+# 3. Tal bag billederne
+# -------------------------
+cat("\n--- Pixel statistik ---\n")
+cat("Gennemsnitlig pixelværdi (alle billeder):", round(mean(X), 4), "\n")
+cat("Lego gennemsnit:   ", round(mean(X[y == 1,,,]), 4), "\n")
+cat("No_Lego gennemsnit:", round(mean(X[y == 0,,,]), 4), "\n")
+cat("Min pixelværdi:", min(X), "| Max:", max(X), "\n")
+
+# -------------------------
+# 4. Train/test split
+# -------------------------
+set.seed(42)
+n         <- length(y)
+test_idx  <- sample(1:n, size = round(n * 0.2))
+train_idx <- setdiff(1:n, test_idx)
+
+X_train <- X[train_idx,,,]
+X_test  <- X[test_idx,,,]
+y_train <- to_categorical(y[train_idx], 2)
+y_test  <- to_categorical(y[test_idx],  2)
+
+# Til evaluering bagefter
+g_test <- y[test_idx]
+
+# float32
+X_train_py <- np$array(X_train, dtype = np$float32)
+X_test_py  <- np$array(X_test,  dtype = np$float32)
+y_train_py <- np$array(y_train, dtype = np$float32)
+y_test_py  <- np$array(y_test,  dtype = np$float32)
+
+cat("Træning:", length(train_idx), "billeder\n")
+cat("Test:   ", length(test_idx),  "billeder\n")
+
+# -------------------------
+# 5. Byg CNN model
+# -------------------------
+# CONVOLUTION: scanner billedet med filtre for at finde kanter/mønstre
+# POOLING:     reducerer størrelsen men beholder vigtige features
+model_cnn <- keras_model_sequential()
+
+# Conv block 1 — finder simple features (kanter, farver)
+model_cnn$add(layer_conv_2d(filters = 32, kernel_size = c(3,3), 
+                            padding = "same", activation = "relu", 
+                            input_shape = c(64, 64, 3)))
+model_cnn$add(layer_max_pooling_2d(pool_size = c(2,2)))  # 64x64 -> 32x32
+
+# Conv block 2 — finder mere komplekse mønstre
+model_cnn$add(layer_conv_2d(filters = 64, kernel_size = c(3,3), 
+                            padding = "same", activation = "relu"))
+model_cnn$add(layer_max_pooling_2d(pool_size = c(2,2)))  # 32x32 -> 16x16
+
+# Conv block 3 — finder højniveau features
+model_cnn$add(layer_conv_2d(filters = 128, kernel_size = c(3,3), 
+                            padding = "same", activation = "relu"))
+model_cnn$add(layer_max_pooling_2d(pool_size = c(2,2)))  # 16x16 -> 8x8
+
+# Flatten + Dense layers
+model_cnn$add(layer_flatten())
+model_cnn$add(layer_dropout(rate = 0.5))
+model_cnn$add(layer_dense(units = 128, activation = "relu"))
+model_cnn$add(layer_dense(units = 2,   activation = "softmax"))
+
+summary(model_cnn)
+
+# -------------------------
+# 6. Compile og træn
+# -------------------------
+model_cnn$compile(
+  loss      = "categorical_crossentropy",
+  optimizer = optimizer_rmsprop(),
+  metrics   = list("accuracy")
+)
+
+history <- model_cnn$fit(
+  X_train_py,
+  y_train_py,
+  epochs           = 30L,
+  batch_size       = 4L,
+  validation_split = 0.2
+)
+
+# -------------------------
+# 7. Plot træningshistorik
+# -------------------------
+history_df <- data.frame(
+  epoch   = 1:length(history$history$loss),
+  acc     = unlist(history$history$accuracy),
+  val_acc = unlist(history$history$val_accuracy),
+  loss    = unlist(history$history$loss),
+  val_loss= unlist(history$history$val_loss)
+)
+
+ggplot(history_df, aes(x = epoch)) +
+  geom_line(aes(y = acc,     color = "Train Accuracy")) +
+  geom_line(aes(y = val_acc, color = "Validation Accuracy")) +
+  labs(title = "CNN - Lego vs No_Lego træningshistorik",
+       x = "Epoch", y = "Accuracy", color = "Legend") +
+  theme_minimal()
+
+# -------------------------
+# 8. Evaluer modellen
+# -------------------------
+accuracy <- function(pred, truth) {
+  mean(drop(as.numeric(pred)) == drop(truth))
+}
+
+preds        <- model_cnn$predict(X_test_py)
+pred_classes <- apply(preds, 1, which.max) - 1L
+acc          <- accuracy(pred_classes, g_test)
+
+cat("\n--- Model evaluering ---\n")
+cat("Test accuracy:", round(acc * 100, 1), "%\n")
+
+# Confusion matrix
+conf_matrix <- table(Predicted = pred_classes, Actual = g_test)
+print(conf_matrix)
+
+# Visualiser confusion matrix
+conf_df <- as.data.frame(conf_matrix)
+conf_df$Predicted <- ifelse(conf_df$Predicted == "1", "LEGO", "NO LEGO")
+conf_df$Actual    <- ifelse(conf_df$Actual    == "1", "LEGO", "NO LEGO")
+
+ggplot(conf_df, aes(x = Actual, y = Predicted, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), size = 8, color = "white") +
+  scale_fill_gradient(low = "steelblue", high = "darkblue") +
+  labs(title = "Confusion Matrix — CNN Lego klassifikation") +
+  theme_minimal()
+
+# -------------------------
+# 9. Vis test billeder med forudsigelser
+# -------------------------
+par(mar = c(0, 0, 2, 0), mfrow = c(2, 4))
+for (i in 1:min(8, length(test_idx))) {
+  img        <- readJPEG(c(lego_files, no_lego_files)[test_idx[i]])
+  true_label <- ifelse(g_test[i] == 1, "LEGO", "NO LEGO")
+  pred_label <- ifelse(pred_classes[i] == 1, "LEGO", "NO LEGO")
+  correct    <- ifelse(true_label == pred_label, "✓", "✗")
+  plot(as.raster(img))
+  title(paste0(correct, " Sand: ", true_label, "\nGæt: ", pred_label),
+        col.main = ifelse(true_label == pred_label, "darkgreen", "red"))
+  
+  
+  
+  
+  
+  ####
+  
+  # -------------------------
+# MobileNetV2 gætter på Lego billeder
+# -------------------------
+
+# Load MobileNetV2
+model_mobile <- application_mobilenet_v2(weights = "imagenet")
+
+# Load billeder
+lego_dir   <- "C:/Users/mehdi/Documents/Dataanalyse 2 semester/Valgfag NLP/Uge 17/Tirsdag - Billeder i R/Lego"
+lego_files <- list.files(lego_dir, full.names = TRUE)
+
+x <- array(dim = c(length(lego_files), 224, 224, 3))
+for (i in 1:length(lego_files)) {
+  img      <- image_load(lego_files[i], target_size = c(224, 224))
+  x[i,,,] <- image_to_array(img)
+}
+
+# MobileNetV2 har sin egen preprocess funktion
+x <- mobilenet_v2_preprocess_input(x)
+
+# Gæt
+x_py   <- np$array(x, dtype = np$float32)
+preds  <- model_mobile$predict(x_py)
+result <- imagenet_decode_predictions(preds, top = 1)
+
+# Print resultater
+cat("MobileNetV2 gætter på dine Lego billeder:\n\n")
+for (i in 1:length(lego_files)) {
+  gæt   <- result[[i]][1, "class_description"]
+  score <- round(as.numeric(result[[i]][1, "score"]) * 100, 1)
+  cat(basename(lego_files[i]), "→", gæt, paste0("(", score, "%)\n"))
+}
+}
+
+
+# -------------------------
+# MobileNetV2 gætter på Lego billeder
+# -------------------------
+
+# Load MobileNetV2
+model_mobile <- application_mobilenet_v2(weights = "imagenet")
+
+# Load billeder
+lego_dir   <- "C:/Users/mehdi/Documents/Dataanalyse 2 semester/Valgfag NLP/Uge 17/Tirsdag - Billeder i R/Lego"
+lego_files <- list.files(lego_dir, full.names = TRUE)
+
+x <- array(dim = c(length(lego_files), 224, 224, 3))
+for (i in 1:length(lego_files)) {
+  img      <- image_load(lego_files[i], target_size = c(224, 224))
+  x[i,,,] <- image_to_array(img)
+}
+
+# MobileNetV2 har sin egen preprocess funktion
+x <- x / 255
+
+# Gæt
+x_py   <- np$array(x, dtype = np$float32)
+preds  <- model_mobile$predict(x_py)
+result <- imagenet_decode_predictions(preds, top = 1)
+
+# Print resultater
+cat("MobileNetV2 gætter på dine Lego billeder:\n\n")
+for (i in 1:length(lego_files)) {
+  gæt   <- result[[i]][1, "class_description"]
+  score <- round(as.numeric(result[[i]][1, "score"]) * 100, 1)
+  cat(basename(lego_files[i]), "→", gæt, paste0("(", score, "%)\n"))
+}
+
+
+# Plot billeder med MobileNetV2 gæt
+par(mar = c(0, 0, 2, 0), mfrow = c(3, 6))
+
+for (i in 1:length(lego_files)) {
+  img   <- readJPEG(lego_files[i])
+  gæt   <- result[[i]][1, "class_description"]
+  score <- round(as.numeric(result[[i]][1, "score"]) * 100, 1)
+  plot(as.raster(img))
+  title(paste0(gæt, "\n", score, "%"), cex.main = 0.8)
+}

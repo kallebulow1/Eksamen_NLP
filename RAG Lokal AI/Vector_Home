@@ -1,0 +1,500 @@
+# ---- Importer pakker ----
+
+import os
+
+print("KØRER VEKTOR_HOME-FILEN")
+print("CURRENT WORKING DIRECTORY:")
+print(os.getcwd())
+
+import shutil
+import re
+import pandas as pd
+
+from sentida import Sentida
+
+from langchain_ollama import OllamaEmbeddings
+from langchain_chroma import Chroma
+from langchain_core.documents import Document
+
+
+
+# ---- Indstillinger ----
+
+print("KØRER VEKTOR_HOME")
+
+home_file = "/Users/benjaminjorgensen/Downloads/home.csv"
+drenge_file = "/Users/benjaminjorgensen/Downloads/drenge.xls"
+piger_file = "/Users/benjaminjorgensen/Downloads/piger.xls"
+
+db_location = "/Users/benjaminjorgensen/Documents/LocalAIAgentWithRAG/home_chroma_v3"
+
+collection_name = "home_reviews_v3"
+
+RESET_DB = False
+# Sæt til True, hvis du vil bygge databasen helt forfra.
+# Når den er bygget, sæt den tilbage til False.
+
+
+# ---- Læs home.csv ----
+
+df = pd.read_csv(
+    home_file,
+    encoding="iso-8859-1"
+)
+
+print("Import virker")
+print("Antal anmeldelser før rens:", len(df))
+print("Kolonner:", df.columns)
+
+
+# ---- Fjern rækker uden tekst ----
+
+df = df.dropna(subset=["content"])
+
+df["content"] = df["content"].astype(str)
+
+df = df[df["content"].str.strip() != ""]
+
+print("Antal anmeldelser med tekst:", len(df))
+
+
+# ---- Rens tekst ----
+
+df["content_clean"] = df["content"].str.lower()
+
+df["content_clean"] = df["content_clean"].apply(
+    lambda x: re.sub("[^a-zæøåA-ZÆØÅ0-9\\.\\s-]", " ", x)
+)
+
+df["content_clean"] = df["content_clean"].apply(
+    lambda x: " ".join(x.split())
+)
+
+
+# ---- Rens rating ----
+# Bruges hvis rating står som 15, 25, 35, 45, 55
+
+df["rating"] = pd.to_numeric(df["rating"], errors="coerce")
+
+df["rating_clean"] = df["rating"].astype(float)
+
+df.loc[df["rating_clean"] > 5, "rating_clean"] = (
+    df.loc[df["rating_clean"] > 5, "rating_clean"] - 5
+) / 10
+
+df["rating_clean"] = df["rating_clean"].round(0)
+
+df["rating_clean"] = df["rating_clean"].astype("Int64")
+
+print("Rating-fordeling efter rens:")
+print(df["rating_clean"].value_counts().sort_index())
+
+
+# ---- Ratingbaseret sentiment ----
+
+def lav_rating_sentiment_label(rating):
+    
+    if pd.isna(rating):
+        return "ukendt"
+    
+    if rating >= 4:
+        return "positiv"
+    
+    elif rating == 3:
+        return "neutral"
+    
+    else:
+        return "negativ"
+
+
+def lav_rating_sentiment_score(rating):
+    
+    if pd.isna(rating):
+        return 0
+    
+    if rating >= 4:
+        return 1
+    
+    elif rating == 3:
+        return 0
+    
+    else:
+        return -1
+
+
+df["rating_sentiment_label"] = df["rating_clean"].apply(lav_rating_sentiment_label)
+
+df["rating_sentiment_score"] = df["rating_clean"].apply(lav_rating_sentiment_score)
+
+
+# ---- Ratinggruppe ----
+
+def lav_rating_group(rating):
+    
+    if pd.isna(rating):
+        return "ukendt"
+    
+    if rating <= 2:
+        return "lav rating"
+    
+    elif rating == 3:
+        return "middel rating"
+    
+    else:
+        return "høj rating"
+
+
+df["rating_group"] = df["rating_clean"].apply(lav_rating_group)
+
+
+# ---- Tekstlængde ----
+
+df["text_length"] = df["content"].apply(len)
+
+
+# ---- Sentida score ----
+
+sentida_model = Sentida()
+
+df["sentida_score"] = df["content_clean"].apply(
+    lambda x: sentida_model.sentida(x, output="mean", normal=False)
+)
+
+
+# ---- Sentida label ----
+
+def lav_sentida_label(score):
+    
+    if pd.isna(score):
+        return "ukendt"
+    
+    if score > 0.2:
+        return "positiv"
+    
+    elif score < -0.2:
+        return "negativ"
+    
+    else:
+        return "neutral"
+
+
+df["sentida_label"] = df["sentida_score"].apply(lav_sentida_label)
+
+
+# ---- Find fornavn ----
+
+df["name"] = df["name"].astype(str)
+
+df["fornavn"] = df["name"].str.split().str[0]
+
+df["fornavn"] = df["fornavn"].str.strip().str.title()
+
+
+# ---- Læs navnelister ----
+
+drenge = pd.read_excel(drenge_file)
+piger = pd.read_excel(piger_file)
+
+
+# ---- Brug første kolonne som fornavn ----
+
+drenge = drenge.iloc[:, [0]].copy()
+piger = piger.iloc[:, [0]].copy()
+
+drenge.columns = ["fornavn"]
+piger.columns = ["fornavn"]
+
+
+# ---- Rens navne ----
+
+drenge["fornavn"] = drenge["fornavn"].astype(str).str.strip().str.title()
+piger["fornavn"] = piger["fornavn"].astype(str).str.strip().str.title()
+
+
+# ---- Fjern dubletter ----
+
+drenge = drenge.drop_duplicates(subset=["fornavn"])
+piger = piger.drop_duplicates(subset=["fornavn"])
+
+
+# ---- Lav match-kolonner ----
+
+drenge["drenge_match"] = "Ja"
+piger["pige_match"] = "Ja"
+
+
+# ---- Merge køn ind på anmeldelser ----
+
+df = df.merge(
+    drenge[["fornavn", "drenge_match"]],
+    on="fornavn",
+    how="left"
+)
+
+df = df.merge(
+    piger[["fornavn", "pige_match"]],
+    on="fornavn",
+    how="left"
+)
+
+
+# ---- Estimer køn ----
+
+def find_gender(row):
+    
+    if row["drenge_match"] == "Ja" and row["pige_match"] != "Ja":
+        return "mand"
+    
+    elif row["pige_match"] == "Ja" and row["drenge_match"] != "Ja":
+        return "kvinde"
+    
+    elif row["drenge_match"] == "Ja" and row["pige_match"] == "Ja":
+        return "begge_muligheder"
+    
+    else:
+        return "ukendt"
+
+
+df["gender"] = df.apply(find_gender, axis=1)
+
+
+# ---- Manuel rettelse af tydelige fornavne ----
+
+mand_navne_manual = [
+    "Kim", "Tonny", "Glenn", "Bo", "Roman", "Niels",
+    "Jonny", "Johnny", "Benny", "Dilan", "Toni",
+    "Miki", "Dan", "Chris", "Ronnie", "Kenneth"
+]
+
+kvinde_navne_manual = [
+    "Maria", "Anne", "Sascha", "Inge", "Hanan",
+    "Mai", "Nana", "Jannie", "Andrea", "Ann-Maria",
+    "Irenie", "Ann-Mary", "Isabeel"
+]
+
+
+df.loc[
+    df["fornavn"].isin(mand_navne_manual),
+    "gender"
+] = "mand"
+
+df.loc[
+    df["fornavn"].isin(kvinde_navne_manual),
+    "gender"
+] = "kvinde"
+
+
+print("Fordeling af estimeret køn:")
+print(df["gender"].value_counts())
+
+
+# ---- Lav dato, ugedag og måned ----
+
+df["published_date"] = pd.to_datetime(
+    df["published"],
+    errors="coerce",
+    dayfirst=True
+)
+
+df["weekday_num"] = df["published_date"].dt.dayofweek
+
+weekday_map = {
+    0: "mandag",
+    1: "tirsdag",
+    2: "onsdag",
+    3: "torsdag",
+    4: "fredag",
+    5: "lørdag",
+    6: "søndag"
+}
+
+df["weekday"] = df["weekday_num"].map(weekday_map)
+
+df["month_num"] = df["published_date"].dt.month
+
+month_map = {
+    1: "januar",
+    2: "februar",
+    3: "marts",
+    4: "april",
+    5: "maj",
+    6: "juni",
+    7: "juli",
+    8: "august",
+    9: "september",
+    10: "oktober",
+    11: "november",
+    12: "december"
+}
+
+df["month"] = df["month_num"].map(month_map)
+
+df["year_month"] = df["published_date"].dt.to_period("M").astype(str)
+
+print("Fordeling af ugedage:")
+print(df["weekday"].value_counts())
+
+print("Fordeling af måneder:")
+print(df["month"].value_counts())
+
+
+# ---- Lav kort tekst til vector store ----
+
+def lav_kort_tekst(row):
+    
+    tekst = f"""
+Titel: {row.get("title", "")}
+Anmeldelse: {row.get("content", "")}
+Rating: {row.get("rating_clean", "")}
+Ratinggruppe: {row.get("rating_group", "")}
+Ratingbaseret sentiment: {row.get("rating_sentiment_label", "")}
+Sentida score: {row.get("sentida_score", "")}
+Sentida label: {row.get("sentida_label", "")}
+Navn: {row.get("name", "")}
+Fornavn: {row.get("fornavn", "")}
+Estimeret køn: {row.get("gender", "")}
+Dato: {row.get("published", "")}
+Ugedag: {row.get("weekday", "")}
+Måned: {row.get("month", "")}
+År-måned: {row.get("year_month", "")}
+Tekstlængde: {row.get("text_length", "")}
+"""
+    
+    tekst = tekst.replace("\n", " ")
+    tekst = " ".join(tekst.split())
+    
+    return tekst[:1000]
+
+
+df["kort_tekst"] = df.apply(lav_kort_tekst, axis=1)
+
+
+# ---- Lav documents ----
+
+documents = []
+ids = []
+
+for i, row in df.iterrows():
+    
+    document = Document(
+        page_content=row["kort_tekst"],
+        metadata={
+            "rating": float(row.get("rating_clean", 0)) if pd.notna(row.get("rating_clean", 0)) else 0,
+            "rating_group": str(row.get("rating_group", "")),
+            "rating_sentiment_label": str(row.get("rating_sentiment_label", "")),
+            "rating_sentiment_score": int(row.get("rating_sentiment_score", 0)) if pd.notna(row.get("rating_sentiment_score", 0)) else 0,
+            "sentida_score": float(row.get("sentida_score", 0)) if pd.notna(row.get("sentida_score", 0)) else 0,
+            "sentida_label": str(row.get("sentida_label", "")),
+            "published": str(row.get("published", "")),
+            "published_date": str(row.get("published_date", "")),
+            "weekday": str(row.get("weekday", "")),
+            "month": str(row.get("month", "")),
+            "year_month": str(row.get("year_month", "")),
+            "weekday_num": int(row.get("weekday_num", -1)) if pd.notna(row.get("weekday_num", -1)) else -1,
+            "name": str(row.get("name", "")),
+            "title": str(row.get("title", "")),
+            "fornavn": str(row.get("fornavn", "")),
+            "gender": str(row.get("gender", "")),
+            "text_length": int(row.get("text_length", 0)) if pd.notna(row.get("text_length", 0)) else 0
+        }
+    )
+    
+    documents.append(document)
+    ids.append(str(i))
+
+
+print("Antal dokumenter klar til vector store:", len(documents))
+
+
+# ---- Embedding model ----
+
+embeddings = OllamaEmbeddings(model="mxbai-embed-large")
+
+
+# ---- Slet database hvis RESET_DB er True ----
+
+if RESET_DB is True:
+    
+    if os.path.exists(db_location):
+        
+        shutil.rmtree(db_location)
+        
+        print("Gammel Chroma database slettet.")
+
+
+# ---- Lav Chroma-mappe ----
+
+os.makedirs(db_location, exist_ok=True)
+
+
+# ---- Lav Chroma database ----
+
+vector_store = Chroma(
+    collection_name=collection_name,
+    persist_directory=db_location,
+    embedding_function=embeddings
+)
+
+
+# ---- Tjek om databasen allerede har dokumenter ----
+
+antal_i_db = vector_store._collection.count()
+
+print("Antal dokumenter i Chroma før:", antal_i_db)
+
+
+# ---- Tilføj dokumenter kun hvis databasen er tom ----
+
+if antal_i_db == 0:
+    
+    for j in range(len(documents)):
+        
+        try:
+            print("Tilføjer dokument:", j + 1, "af", len(documents))
+            
+            vector_store.add_documents(
+                documents=[documents[j]],
+                ids=[ids[j]]
+            )
+            
+        except Exception as e:
+            print("FEJL ved dokument:", j)
+            print("ID:", ids[j])
+            print("Tekstlængde:", len(documents[j].page_content))
+            print("Tekst:")
+            print(documents[j].page_content)
+            print("Fejl:")
+            print(e)
+            break
+
+else:
+    
+    print("Chroma database findes allerede. Tilføjer ikke dokumenter igen.")
+
+
+# ---- Retriever ----
+
+retriever = vector_store.as_retriever(
+    search_kwargs={
+        "k": 5
+    }
+)
+
+
+# ---- Kontrol-output ----
+
+print("\nAntal dokumenter efter:", vector_store._collection.count())
+
+print("\nFordeling af ratingbaseret sentiment:")
+print(df["rating_sentiment_label"].value_counts())
+
+print("\nFordeling af Sentida sentiment:")
+print(df["sentida_label"].value_counts())
+
+print("\nGennemsnitlig rating:")
+print(round(df["rating_clean"].mean(), 2))
+
+print("\nGennemsnitlig Sentida-score:")
+print(round(df["sentida_score"].mean(), 3))
+
+print("\nVector store er klar.")

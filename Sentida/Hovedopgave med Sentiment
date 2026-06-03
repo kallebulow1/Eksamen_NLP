@@ -1,0 +1,465 @@
+# ---- Installer pakker ----
+
+install.packages("tidytext")
+install.packages("pdftools")
+install.packages("dplyr")
+install.packages("tidyr")
+install.packages("stringr")
+install.packages("ggplot2")
+install.packages("topicmodels")
+
+
+# ---- Pakker ----
+
+library(pdftools)
+library(tidytext)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(topicmodels)
+
+# ---- Indlæs PDF ----
+
+text <- pdf_text("Hovedopgave V.1 ændret.pdf")
+
+length(text)
+
+
+# ---- Lav PDF tekst til dataframe ----
+
+text_df <- data.frame(
+  page = 1:length(text),
+  text = text,
+  stringsAsFactors = FALSE
+)
+
+
+# ---- Fjern tom tekst ----
+
+text_df <- text_df %>%
+  filter(!is.na(text)) %>%
+  filter(text != "")
+
+
+# ---- Fjern uønskede sider ----
+
+text_df_clean <- text_df %>%
+  filter(page >= 4) %>%      
+  filter(page <= 48)         
+
+
+# ---- Find opgave-afsnit ----
+
+text_df_clean <- text_df_clean %>%
+  mutate(
+    section = ifelse(str_detect(text, "Opgave"), text, NA)
+  ) %>%
+  fill(section, .direction = "down")
+
+
+# ---- Lav tidy text ----
+
+words_df <- text_df_clean %>%
+  unnest_tokens(word, text)
+
+# ---- Danske stopord ----
+
+mine_stopord <- data.frame(
+  word = c(
+    "ad", "af", "akkurat", "al", "aldrig", "alene", "alle", "allerede", "alligevel", "alt",
+    "altid", "altså", "anden", "andet", "andre", "art", "at", "bag", "bare", "begge",
+    "bl.a.", "blandt", "blev", "blive", "bliver", "blot", "bringe", "brug", "burde",
+    "både", "bør", "ca.", "da", "dag", "de", "del", "dem", "den", "denne", "dens",
+    "der", "derefter", "deres", "derfor", "derfra", "deri", "dermed", "derpå", "derved",
+    "des", "desto", "det", "dets", "dette", "dig", "din", "dine", "disse", "dit", "dog",
+    "du", "dér", "dét", "efter", "egen", "ej", "eller", "ellers", "en", "end", "endelig",
+    "endnu", "ene", "eneste", "enhver", "ens", "enten", "er", "et", "f.eks.", "faktisk",
+    "far", "fat", "fem", "fik", "find", "finde", "fire", "flere", "flest", "fleste",
+    "for", "foran", "fordi", "forrige", "fortsat", "fra", "fx", "få", "får", "følg",
+    "følge", "følger", "før", "først", "første", "f.eks", "f.eks.", "fx.", "fx", "gang", "gennem", "gerne", "gid",
+    "giv", "giver", "givet", "gjorde", "gjort", "god", "godt", "gå", "går", "gør",
+    "gøre", "gørende", "ha", "haft", "ham", "han", "hans", "har", "havde", "have",
+    "hej", "hel", "heldigvis", "hele", "heller", "helst", "helt", "hen", "hende",
+    "hendes", "henover", "her", "herefter", "heri", "hermed", "herpå", "holder", "hos",
+    "hun", "hvad", "hvem", "hver", "hvert", "hvilke", "hvilken", "hvilkes", "hvis",
+    "hvor", "hvordan", "hvorefter", "hvorfor", "hvorfra", "hvorhen", "hvori", "hvorimod",
+    "hvornår", "hvorved", "hør", "hører", "hørt", "hørte", "i", "igen", "igennem",
+    "ikke", "imellem", "imens", "imod", "ind", "indtil", "ingen", "intet", "især",
+    "iøvrigt", "ja", "jeg", "jer", "jeres", "jo", "kan", "kom", "komme", "kommer",
+    "kommet", "kun", "kunne", "lad", "langs", "lav", "lave", "lavet", "lidt", "lig",
+    "lige", "ligesom", "ligeså", "ligge", "ligger", "lille", "lissom", "længere",
+    "man", "mand", "mange", "med", "meget", "mellem", "men", "mens", "mere", "mest",
+    "mig", "min", "mindre", "mindst", "mine", "mit", "mod", "må", "måske", "måtte",
+    "måttet", "ned", "nej", "nemlig", "netop", "ni", "nogen", "nogensinde", "noget",
+    "nogle", "nok", "nu", "ny", "nye", "nyt", "nå", "når", "nær", "næste", "næsten",
+    "og", "også", "okay", "om", "omkring", "op", "os", "otte", "over", "overalt",
+    "overhovedet", "pga.", "på", "ret", "rigt", "ro", "rundt", "sagt", "samme",
+    "sammen", "se", "seks", "selv", "selvom", "senere", "ser", "ses", "set", "siden",
+    "sig", "sige", "siger", "simpelthen", "sin", "sine", "sit", "skal", "skam", "ske",
+    "sker", "skulle", "små", "småt", "snart", "som", "stadig", "stor", "store",
+    "stort", "synes", "syntes", "syv", "så", "sådan", "således", "såmænd", "såvel",
+    "særlig", "tag", "tage", "temmelig", "thi", "ti", "tidligere", "til", "tilbage",
+    "tit", "to", "tre", "tæt", "ud", "ude", "uden", "udover", "under", "undtagen",
+    "var", "ved", "vel", "vi", "via", "videre", "vil", "ville", "vis", "vise", "vist",
+    "vor", "vore", "vores", "vort", "vær", "være", "været", "véd", "år", "års", "én",
+    "ét", "øvrigt"
+  ),
+  stringsAsFactors = FALSE
+)
+
+
+# ---- Fjern stopord og tal ----
+
+words_clean <- words_df %>%
+  anti_join(mine_stopord, by = "word") %>%
+  filter(!str_detect(word, "^[0-9]+$")) %>%
+  filter(str_length(word) > 2)
+
+
+# ---- Optæl mest brugte ord ----
+
+word_count <- words_clean %>%
+  count(word, sort = TRUE)
+
+
+# ---- Se top 30 ord ----
+
+head(word_count, 30)
+
+# ---- Pakker ----
+library(wordcloud2)
+
+# ---- Word count ----
+
+word_count <- words_clean %>%
+  count(word, sort = TRUE)
+
+# ---- Word cloud ----
+
+wordcloud2(
+  data = word_count,
+  size = 1,
+  color = "random-light",
+  backgroundColor = "black"
+)
+
+# ---- Tæl ord pr dokument ----
+
+word_count <- words_clean %>%
+  count(page, word, sort = TRUE)
+
+
+# ---- Lav document-term matrix ----
+names(word_count)
+dtm <- word_count %>%
+  cast_dtm(page, word, n)
+
+
+# ---- Kør LDA model ----
+# k = antal topics/emner
+
+lda_model <- LDA(
+  dtm,
+  k = 2,
+  control = list(seed = 1234)
+)
+
+
+# ---- Find de vigtigste ord i hvert topic ----
+
+topics_words <- tidy(lda_model, matrix = "beta")
+
+
+top_words <- topics_words %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>%
+  ungroup() %>%
+  arrange(topic, desc(beta))
+
+
+# ---- Plot topics ----
+names(top_words)
+ggplot(top_words, aes(x = reorder(term, beta), y = beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  facet_wrap(~ topic, scales = "free") +
+  labs(
+    title = "Topord i hvert topic",
+    x = "Ord",
+    y = "Beta"
+  )
+
+
+
+
+# ---- Pakker ----
+
+library(pdftools)
+library(dplyr)
+library(tidytext)
+library(stringr)
+library(topicmodels)
+library(ggplot2)
+library(tidyr)
+
+
+# ---- Indlæs PDF ----
+
+text <- pdf_text("Hovedopgave V.1 ændret.pdf")
+
+
+# ---- Lav tekst til dataframe ----
+
+text_df <- data.frame(
+  document = paste0("side_", 1:length(text)),
+  text = text,
+  stringsAsFactors = FALSE
+)
+
+
+# ---- Rens tekst ----
+
+text_df$text <- tolower(text_df$text)
+
+text_df$text <- str_replace_all(text_df$text, "[0-9]", " ")
+
+text_df$text <- str_replace_all(text_df$text, "[[:punct:]]", " ")
+
+text_df$text <- str_replace_all(text_df$text, "\\s+", " ")
+
+
+# ---- Lav ord-data ----
+
+words_df <- text_df %>%
+  unnest_tokens(word, text)
+
+
+# ---- Fjern danske stopord ----
+
+stopord <- data.frame(
+  word = c(
+    "og", "i", "jeg", "det", "at", "en", "den", "til", "er", "som",
+    "på", "de", "med", "han", "af", "for", "ikke", "der", "var",
+    "mig", "sig", "men", "et", "har", "om", "vi", "min", "havde",
+    "ham", "hun", "nu", "over", "da", "fra", "du", "ud", "sin",
+    "dem", "os", "op", "man", "hans", "hvor", "eller", "hvad",
+    "skal", "selv", "her", "alle", "vil", "blev", "kunne", "ind"
+  )
+)
+
+words_clean <- words_df %>%
+  anti_join(stopord, by = "word") %>%
+  filter(str_length(word) > 2)
+
+
+# ---- Visualisering: top 20 ord ----
+
+top20 <- word_count %>%
+  slice_max(n, n = 20)
+
+ggplot(top20, aes(x = reorder(word, n), y = n)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Mest brugte ord i eksamenscasen",
+    x = "Ord",
+    y = "Antal"
+  )
+
+
+# ---- Søg efter centrale fagord ----
+
+fagord <- c(
+  "brøndby", "expected", "goals", "points", "xg", "xp",
+  "clustering", "visualisering", "shiny", "freeze",
+  "frame", "etikken", "etik", "videnskabsteori", "ophavsret"
+)
+
+
+# ---- Optæl centrale fagord ----
+
+fagord_count <- words_clean %>%
+  filter(word %in% fagord) %>%
+  count(word, sort = TRUE)
+
+fagord_count
+
+
+# ---- Plot centrale fagord ----
+
+ggplot(fagord_count, aes(x = reorder(word, n), y = n)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Centrale fagord i eksamenscasen",
+    x = "Fagord",
+    y = "Antal"
+  )
+
+
+# ---- Pakker ----
+
+library(wordcloud)
+library(RColorBrewer)
+library(readr)
+
+# ---- Lav dansk sentiment ----
+# polarity > 0 = positiv
+# polarity < 0 = negativ
+
+url <- "https://raw.githubusercontent.com/dsldk/danish-sentiment-lexicon/main/2_headword_headword_polarity.csv"
+
+danish_sentiment <- read_csv(
+  url,
+  col_names = c(
+    "word",
+    "homograph",
+    "word_class",
+    "ddo_id",
+    "polarity",
+    "word_forms"
+  ),
+  show_col_types = FALSE,
+  locale = locale(encoding = "UTF-8")
+)
+
+danish_sentiment <- danish_sentiment %>%
+  mutate(sentiment = if_else(polarity > 0, "positive", "negative"))
+
+danish_sentiment_unique <- danish_sentiment %>%
+  group_by(word) %>%
+  summarise(
+    polarity = mean(polarity, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    sentiment = if_else(polarity > 0, "positive", "negative")
+  )
+
+
+# ---- Join ord med sentiment ----
+# Her kobler vi dine ord sammen med sentiment-ordbogen
+
+sentiment_words <- words_clean %>%
+  inner_join(danish_sentiment, by = "word")
+
+
+# ---- Optæl ord efter sentiment ----
+
+sentiment_count <- sentiment_words %>%
+  count(word, sentiment, sort = TRUE)
+
+
+# ---- Lav bred dataframe ----
+# comparison.cloud skal bruge én kolonne for positiv og én for negativ
+
+sentiment_wide <- sentiment_count %>%
+  pivot_wider(
+    names_from = sentiment,
+    values_from = n,
+    values_fill = 0
+  )
+
+
+# ---- Lav matrix til comparison.cloud ----
+
+sentiment_matrix <- sentiment_wide %>%
+  select(positive, negative) %>%
+  as.matrix()
+
+rownames(sentiment_matrix) <- sentiment_wide$word
+
+
+# ---- Lav comparison cloud ----
+
+comparison.cloud(
+  sentiment_matrix,
+  colors = c("gray20", "red"),
+  max.words = 100,
+  random.order = FALSE
+)
+
+# ---- Lav word count ----
+
+# Hvert ord tæller
+word_count <- words_clean %>%
+  count(word, sort = TRUE)
+
+# ---- Lav total antal ord ----
+total_words <- word_count %>%
+  summarise(
+    total = sum(n)
+  )
+
+# ---- Lav freq_by_rank ----
+
+# n = antal gange ordet bruges
+
+# total = samlet antal ord
+
+# rank = ordets placering
+
+# term_frequency = ordets andel af alle ord
+
+freq_by_rank <- word_count %>%
+  mutate(
+    total = sum(n),
+    rank = row_number(),
+    term_frequency = n / total
+  )
+
+# ---- Se resultatet ----
+head(freq_by_rank, 20)
+
+# ---- Plot rank mod term frequency ----
+
+ggplot(freq_by_rank, aes(x = rank, y = term_frequency)) +
+  geom_line() +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(
+    title = "Ord-frekvens efter rank",
+    x = "Rank",
+    y = "Term frequency"
+  )
+
+# ---- Vælg midterområdet ----
+# Vi fjerner de allermest brugte og de allermindst brugte ord
+
+rank_subset <- freq_by_rank %>%
+  filter(rank < 500) %>%
+  filter(rank > 10)
+
+
+# ---- Lineær model ----
+
+zipf_model <- lm(
+  log10(term_frequency) ~ log10(rank),
+  data = rank_subset
+)
+zipf_model
+
+# ---- Plot med lineær sammenhæng ----
+
+ggplot(freq_by_rank, aes(x = rank, y = term_frequency)) +
+  geom_line() +
+  geom_smooth(
+    data = rank_subset,
+    method = "lm",
+    se = FALSE
+  ) +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(
+    title = "Zipfs lov: ord-frekvens og rank",
+    x = "Rank",
+    y = "Term frequency"
+  )
+
+
+# ---- Se modelresultat ----
+
+summary(zipf_model)
+
+save.image("hovedopgave_word_count")

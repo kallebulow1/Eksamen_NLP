@@ -1,0 +1,389 @@
+# How to guide: Sentida i R
+
+## Hvad er Sentida?
+
+Sentida er et R-værktøj til sentimentanalyse af dansk tekst.
+
+Sentimentanalyse betyder, at man prøver at måle, om en tekst er:
+
+- positiv
+- neutral
+- negativ
+
+Sentida giver teksten en numerisk score.
+
+En positiv score betyder, at teksten er positiv.  
+En negativ score betyder, at teksten er negativ.  
+En score tæt på 0 betyder, at teksten er neutral eller blandet.
+
+Sentida kan bruges til analyse af f.eks.:
+
+- Trustpilot-anmeldelser
+- kundekommentarer
+- spørgeskemasvar
+- politiske taler
+- sociale medier
+- produktanmeldelser
+
+---
+
+## 1. Installation
+
+Først installeres de nødvendige pakker.
+
+```r
+# ---- Installer pakker ----
+
+install.packages("remotes")
+
+remotes::install_github("Guscode/Sentida")
+```
+
+Derefter indlæses pakken.
+
+```r
+# ---- Indlæs pakke ----
+
+library(Sentida)
+```
+
+---
+
+## 2. Simpelt eksempel med én tekst
+
+```r
+# ---- Simpel tekst ----
+
+tekst <- "Jeg er virkelig glad for produktet. Det virker godt."
+
+# ---- Sentiment score ----
+
+sentiment_score <- sentida(tekst)
+
+# ---- Se resultat ----
+
+sentiment_score
+```
+
+Hvis resultatet er over 0, er teksten positiv.  
+Hvis resultatet er under 0, er teksten negativ.  
+Hvis resultatet er tæt på 0, er teksten neutral eller blandet.
+
+---
+
+## 3. Eksempel med flere tekster
+
+Her laver vi en lille dataframe med fem anmeldelser.
+
+```r
+# ---- Data ----
+
+anmeldelser <- data.frame(
+  id = 1:5,
+  tekst = c(
+    "Produktet er fantastisk og jeg er meget tilfreds.",
+    "Det var en dårlig oplevelse og servicen var elendig.",
+    "Leveringen var hurtig men produktet var middelmådigt.",
+    "Jeg elsker kvaliteten og vil købe igen.",
+    "Det virker ikke og jeg er skuffet."
+  )
+)
+
+# ---- Se data ----
+
+anmeldelser
+```
+
+---
+
+## 4. Lav sentiment-score for hver tekst
+
+```r
+# ---- Sentiment score ----
+
+anmeldelser$sentiment <- sentida(anmeldelser$tekst)
+
+# ---- Se resultat ----
+
+anmeldelser
+```
+
+Nu har dataframen fået en ny kolonne: `sentiment`.
+
+Den viser sentiment-scoren for hver anmeldelse.
+
+---
+
+## 5. Lav kategorier: positiv, neutral og negativ
+
+En numerisk score kan være lidt svær at læse.  
+Derfor laver vi en ny kolonne, som oversætter scoren til tekst.
+
+```r
+# ---- Kategori ----
+
+anmeldelser$kategori <- ifelse(
+  anmeldelser$sentiment > 0,
+  "positiv",
+  ifelse(
+    anmeldelser$sentiment < 0,
+    "negativ",
+    "neutral"
+  )
+)
+
+# ---- Se resultat ----
+
+anmeldelser
+```
+
+Nu har vi tre vigtige kolonner:
+
+| Kolonne | Betydning |
+|---|---|
+| `tekst` | Selve teksten |
+| `sentiment` | Den numeriske sentiment-score |
+| `kategori` | Positiv, neutral eller negativ |
+
+---
+
+## 6. Tæl hvor mange tekster der er positive og negative
+
+```r
+# ---- Optælling ----
+
+table(anmeldelser$kategori)
+```
+
+Denne kode viser, hvor mange anmeldelser der er positive, negative og neutrale.
+
+---
+
+## 7. Beregn gennemsnitlig sentiment
+
+```r
+# ---- Gennemsnit ----
+
+mean(anmeldelser$sentiment)
+```
+
+Hvis gennemsnittet er positivt, er teksterne samlet set positive.  
+Hvis gennemsnittet er negativt, er teksterne samlet set negative.  
+Hvis gennemsnittet er tæt på 0, er teksterne samlet set neutrale eller blandede.
+
+---
+
+## 8. Visualisering med base R
+
+```r
+# ---- Barplot ----
+
+barplot(
+  table(anmeldelser$kategori),
+  main = "Fordeling af sentiment",
+  xlab = "Kategori",
+  ylab = "Antal tekster"
+)
+```
+
+Grafen viser, hvor mange tekster der ligger i hver sentiment-kategori.
+
+---
+
+## 9. Eksempel med CSV-fil
+
+Hvis man har en CSV-fil med anmeldelser, kan man bruge samme metode.
+
+Eksempel:  
+Filen hedder `reviews.csv` og har en kolonne, der hedder `content`.
+
+```r
+# ---- Indlæs data ----
+
+reviews <- read.csv("reviews.csv", stringsAsFactors = FALSE)
+
+# ---- Se kolonnenavne ----
+
+names(reviews)
+```
+
+Lav sentimentanalyse på kolonnen `content`.
+
+```r
+# ---- Sentiment score ----
+
+reviews$sentiment <- sentida(reviews$content)
+```
+
+Lav kategorier.
+
+```r
+# ---- Kategori ----
+
+reviews$kategori <- ifelse(
+  reviews$sentiment > 0,
+  "positiv",
+  ifelse(
+    reviews$sentiment < 0,
+    "negativ",
+    "neutral"
+  )
+)
+```
+
+Se resultatet.
+
+```r
+# ---- Se resultat ----
+
+head(reviews)
+```
+
+---
+
+## 10. Simpel analyse af CSV-data
+
+```r
+# ---- Antal pr. kategori ----
+
+table(reviews$kategori)
+
+# ---- Gennemsnitlig sentiment ----
+
+mean(reviews$sentiment, na.rm = TRUE)
+
+# ---- Graf ----
+
+barplot(
+  table(reviews$kategori),
+  main = "Sentiment i anmeldelser",
+  xlab = "Sentiment kategori",
+  ylab = "Antal anmeldelser"
+)
+```
+
+---
+
+## 11. Samlet kodeeksempel
+
+Her er hele koden samlet i én blok.
+
+```r
+# ---- Pakker ----
+
+library(Sentida)
+
+
+# ---- Data ----
+
+anmeldelser <- data.frame(
+  id = 1:5,
+  tekst = c(
+    "Produktet er fantastisk og jeg er meget tilfreds.",
+    "Det var en dårlig oplevelse og servicen var elendig.",
+    "Leveringen var hurtig men produktet var middelmådigt.",
+    "Jeg elsker kvaliteten og vil købe igen.",
+    "Det virker ikke og jeg er skuffet."
+  )
+)
+
+
+# ---- Sentiment score ----
+
+anmeldelser$sentiment <- sentida(anmeldelser$tekst)
+
+
+# ---- Kategori ----
+
+anmeldelser$kategori <- ifelse(
+  anmeldelser$sentiment > 0,
+  "positiv",
+  ifelse(
+    anmeldelser$sentiment < 0,
+    "negativ",
+    "neutral"
+  )
+)
+
+
+# ---- Resultat ----
+
+print(anmeldelser)
+
+
+# ---- Optælling ----
+
+print(table(anmeldelser$kategori))
+
+
+# ---- Gennemsnit ----
+
+print(mean(anmeldelser$sentiment))
+
+
+# ---- Graf ----
+
+barplot(
+  table(anmeldelser$kategori),
+  main = "Fordeling af sentiment",
+  xlab = "Kategori",
+  ylab = "Antal tekster"
+)
+```
+
+---
+
+## 12. Vigtigt at forstå
+
+Sentida er ikke en perfekt model.
+
+Den kan være god til hurtigt at analysere mange danske tekster, men den kan have svært ved:
+
+- ironi
+- slang
+- kontekst
+- blandede holdninger
+- meget korte tekster
+- tekster med stavefejl
+
+Eksempel:
+
+```r
+sentida("Det var da bare helt fantastisk at vente i 3 timer")
+```
+
+Et menneske kan forstå, at sætningen kan være ironisk.  
+Sentida kan måske læse ordet `"fantastisk"` som positivt.
+
+Derfor skal Sentida bruges som et analyseværktøj, ikke som en facitliste.
+
+---
+
+## 13. Hvornår giver Sentida mening?
+
+Sentida giver mest mening, når man har mange danske tekster og hurtigt vil måle den overordnede stemning.
+
+Det giver mindre mening, hvis man kun har få tekster.  
+Hvis man kun har 5-10 kommentarer, kan man næsten lige så godt læse dem manuelt.
+
+Sentida er stærkest, når man bruger den på mange observationer, f.eks. 100, 1.000 eller 10.000 anmeldelser.
+
+---
+
+## Konklusion
+
+Sentida bruges til at lave sentimentanalyse på dansk tekst.
+
+Det betyder, at man kan måle, om tekster er positive, neutrale eller negative.
+
+Grundideen er:
+
+1. Man har en tekst
+2. Sentida giver teksten en score
+3. Scoren oversættes til positiv, neutral eller negativ
+4. Resultatet kan analyseres med tabeller, gennemsnit og grafer
+
+Sentida er hurtigt, simpelt og godt til dansk tekst.
+
+Men Sentida skal ikke bruges blindt.  
+Resultaterne skal altid vurderes kritisk.

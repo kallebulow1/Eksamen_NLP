@@ -1,0 +1,512 @@
+# ---- Pakker ----
+
+library(pdftools)
+library(tidytext)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(topicmodels)
+library(wordcloud2)
+
+
+# ============================================================
+# EKSTRA STOPWORDS
+# ============================================================
+
+# ---- Ekstra stopord til nyhedsartikler ----
+
+extra_stopwords <- data.frame(
+  word = c(
+    "said", "says", "told", "bbc", "fox", "news", "digital",
+    "reported", "reports", "according", "thursday", "wednesday",
+    "monday", "tuesday", "friday", "saturday", "sunday",
+    "april", "dec", "photo", "images", "getty", "bloomberg",
+    "axios", "click", "download", "app",
+    "taking", "abuses", "started", "statement",
+    "closing", "lower", "react", "senior", "date",
+    "france", "france's", "command", "result", "passed",
+    "involve", "knock", "warned", "added",
+    "jensen", "trump", "khamanei", "das",
+    "1.4", "46p", "126", "114", "110", "2022", "2023", "2026"
+  ),
+  stringsAsFactors = FALSE
+)
+
+
+# ============================================================
+# FOX
+# ============================================================
+
+# ---- Indlæs FOX PDF ----
+
+text_fox <- pdf_text("FOX.pdf")
+
+
+# ---- Lav FOX tekst til dataframe ----
+
+text_df_fox <- data.frame(
+  document = paste0("fox_side_", 1:length(text_fox)),
+  article = "FOX",
+  text = text_fox,
+  stringsAsFactors = FALSE
+)
+
+# ---- Fjern tom tekst FOX ----
+
+text_df_fox <- text_df_fox %>%
+  filter(!is.na(text)) %>%
+  filter(text != "")
+
+
+# ---- Lav tidy text FOX ----
+
+words_fox <- text_df_fox %>%
+  unnest_tokens(word, text)
+
+
+# ---- Rens ord FOX ----
+
+words_clean_fox <- words_fox %>%
+  anti_join(stop_words, by = "word") %>%
+  anti_join(extra_stopwords, by = "word") %>%
+  mutate(
+    word = ifelse(word == "fertiliser", "fertilizer", word)
+  ) %>%
+  filter(!str_detect(word, "^[0-9]+$")) %>%
+  filter(!str_detect(word, "^[0-9]+p$")) %>%
+  filter(str_length(word) > 2)
+
+
+# ---- Word count FOX ----
+
+word_count_fox <- words_clean_fox %>%
+  count(word, sort = TRUE)
+
+
+# ---- Se top 30 ord FOX ----
+
+head(word_count_fox, 30)
+
+
+# ---- Word cloud FOX ----
+
+wordcloud2(
+  data = word_count_fox,
+  size = 1,
+  color = "random-light",
+  backgroundColor = "black"
+)
+
+
+# ---- Tæl ord pr dokument FOX ----
+
+word_count_doc_fox <- words_clean_fox %>%
+  count(document, word, sort = TRUE)
+
+
+# ---- Lav document-term matrix FOX ----
+
+dtm_fox <- word_count_doc_fox %>%
+  cast_dtm(document, word, n)
+
+
+# ---- Kør LDA model FOX ----
+
+lda_fox <- LDA(
+  dtm_fox,
+  k = 2,
+  control = list(seed = 1234)
+)
+
+
+# ---- Beta FOX ----
+
+fox_topics <- tidy(lda_fox, matrix = "beta")
+
+
+# ---- Top 10 ord pr topic FOX ----
+
+fox_top_terms <- fox_topics %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+
+# ---- Plot topord FOX ----
+
+fox_top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered() +
+  labs(
+    title = "Topord i hvert topic - FOX",
+    x = "Beta",
+    y = "Ord"
+  )
+
+
+# ---- Log ratio FOX - stabil version ----
+
+beta_wide_fox <- fox_topics %>%
+  mutate(topic = paste0("topic", topic)) %>%
+  pivot_wider(
+    names_from = topic,
+    values_from = beta,
+    values_fill = 0
+  ) %>%
+  mutate(
+    log_ratio = log2((topic2 + 0.0001) / (topic1 + 0.0001))
+  ) %>%
+  filter(topic1 > 0.001 | topic2 > 0.001) %>%
+  filter(!str_detect(term, "^[0-9]+$")) %>%
+  filter(!str_detect(term, "^[0-9]+p$")) %>%
+  filter(str_length(term) > 2)
+
+
+# ---- Plot log ratio FOX ----
+
+plot_fox_logratio <- beta_wide_fox %>%
+  arrange(log_ratio) %>%
+  slice(c(1:10, (n() - 9):n()))
+
+
+ggplot(plot_fox_logratio, aes(x = log_ratio, y = reorder(term, log_ratio), fill = log_ratio > 0)) +
+  geom_col(show.legend = FALSE) +
+  labs(
+    title = "Ord der adskiller topic 1 og topic 2 - FOX",
+    x = "Log2 ratio: negativ = topic 1, positiv = topic 2",
+    y = "Ord"
+  )
+
+
+# ---- Gamma FOX ----
+
+fox_documents <- tidy(lda_fox, matrix = "gamma")
+
+
+# ---- Hovedtopic pr side FOX ----
+
+fox_main_topic <- fox_documents %>%
+  group_by(document) %>%
+  slice_max(gamma, n = 1) %>%
+  ungroup()
+
+
+# ---- Plot topic-fordeling FOX ----
+
+ggplot(fox_documents, aes(x = document, y = gamma, fill = factor(topic))) +
+  geom_col() +
+  labs(
+    title = "Topic-fordeling pr side - FOX",
+    x = "Side",
+    y = "Gamma",
+    fill = "Topic"
+  )
+
+
+
+# ============================================================
+# BBC
+# ============================================================
+
+# ---- Indlæs BBC PDF ----
+
+text_bbc <- pdf_text("BBC.pdf")
+
+
+# ---- Lav BBC tekst til dataframe ----
+
+text_df_bbc <- data.frame(
+  document = paste0("bbc_side_", 1:length(text_bbc)),
+  article = "BBC",
+  text = text_bbc,
+  stringsAsFactors = FALSE
+)
+
+
+# ---- Fjern tom tekst BBC ----
+
+text_df_bbc <- text_df_bbc %>%
+  filter(!is.na(text)) %>%
+  filter(text != "")
+
+
+# ---- Lav tidy text BBC ----
+
+words_bbc <- text_df_bbc %>%
+  unnest_tokens(word, text)
+
+
+# ---- Rens ord BBC ----
+
+words_clean_bbc <- words_bbc %>%
+  anti_join(stop_words, by = "word") %>%
+  anti_join(extra_stopwords, by = "word") %>%
+  mutate(
+    word = ifelse(word == "fertiliser", "fertilizer", word)
+  ) %>%
+  filter(!str_detect(word, "^[0-9]+$")) %>%
+  filter(!str_detect(word, "^[0-9]+p$")) %>%
+  filter(str_length(word) > 2)
+
+
+# ---- Word count BBC ----
+
+word_count_bbc <- words_clean_bbc %>%
+  count(word, sort = TRUE)
+
+
+# ---- Se top 30 ord BBC ----
+
+head(word_count_bbc, 30)
+
+
+# ---- Word cloud BBC ----
+
+wordcloud2(
+  data = word_count_bbc,
+  size = 1,
+  color = "random-light",
+  backgroundColor = "black"
+)
+
+
+# ---- Tæl ord pr dokument BBC ----
+
+word_count_doc_bbc <- words_clean_bbc %>%
+  count(document, word, sort = TRUE)
+
+
+# ---- Lav document-term matrix BBC ----
+
+dtm_bbc <- word_count_doc_bbc %>%
+  cast_dtm(document, word, n)
+
+
+# ---- Kør LDA model BBC ----
+
+lda_bbc <- LDA(
+  dtm_bbc,
+  k = 2,
+  control = list(seed = 1234)
+)
+
+
+# ---- Beta BBC ----
+
+bbc_topics <- tidy(lda_bbc, matrix = "beta")
+
+
+# ---- Top 10 ord pr topic BBC ----
+
+bbc_top_terms <- bbc_topics %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+
+# ---- Plot topord BBC ----
+
+bbc_top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered() +
+  labs(
+    title = "Topord i hvert topic - BBC",
+    x = "Beta",
+    y = "Ord"
+  )
+
+
+# ---- Log ratio BBC - stabil version ----
+
+beta_wide_bbc <- bbc_topics %>%
+  mutate(topic = paste0("topic", topic)) %>%
+  pivot_wider(
+    names_from = topic,
+    values_from = beta,
+    values_fill = 0
+  ) %>%
+  mutate(
+    log_ratio = log2((topic2 + 0.0001) / (topic1 + 0.0001))
+  ) %>%
+  filter(topic1 > 0.001 | topic2 > 0.001) %>%
+  filter(!str_detect(term, "^[0-9]+$")) %>%
+  filter(!str_detect(term, "^[0-9]+p$")) %>%
+  filter(str_length(term) > 2)
+
+
+# ---- Plot log ratio BBC ----
+
+plot_bbc_logratio <- beta_wide_bbc %>%
+  arrange(log_ratio) %>%
+  slice(c(1:10, (n() - 9):n()))
+
+
+ggplot(plot_bbc_logratio, aes(x = log_ratio, y = reorder(term, log_ratio), fill = log_ratio > 0)) +
+  geom_col(show.legend = FALSE) +
+  labs(
+    title = "Ord der adskiller topic 1 og topic 2 - BBC",
+    x = "Log2 ratio: negativ = topic 1, positiv = topic 2",
+    y = "Ord"
+  )
+
+
+# ---- Gamma BBC ----
+
+bbc_documents <- tidy(lda_bbc, matrix = "gamma")
+
+
+# ---- Hovedtopic pr side BBC ----
+
+bbc_main_topic <- bbc_documents %>%
+  group_by(document) %>%
+  slice_max(gamma, n = 1) %>%
+  ungroup()
+
+
+# ---- Plot topic-fordeling BBC ----
+
+ggplot(bbc_documents, aes(x = document, y = gamma, fill = factor(topic))) +
+  geom_col() +
+  labs(
+    title = "Topic-fordeling pr side - BBC",
+    x = "Side",
+    y = "Gamma",
+    fill = "Topic"
+  )
+
+
+
+# ============================================================
+# TF-IDF SAMMENLIGNING MELLEM FOX OG BBC
+# ============================================================
+
+# ---- Saml FOX og BBC som to dokumenter ----
+
+text_df_all <- data.frame(
+  document = c("FOX", "BBC"),
+  text = c(
+    paste(text_fox, collapse = " "),
+    paste(text_bbc, collapse = " ")
+  ),
+  stringsAsFactors = FALSE
+)
+
+
+# ---- Lav tidy text samlet ----
+
+words_all <- text_df_all %>%
+  unnest_tokens(word, text)
+
+
+# ---- Rens samlet tekst ----
+
+words_clean_all <- words_all %>%
+  anti_join(stop_words, by = "word") %>%
+  anti_join(extra_stopwords, by = "word") %>%
+  mutate(
+    word = ifelse(word == "fertiliser", "fertilizer", word)
+  ) %>%
+  filter(!str_detect(word, "^[0-9]+$")) %>%
+  filter(!str_detect(word, "^[0-9]+p$")) %>%
+  filter(str_length(word) > 2)
+
+
+# ---- Tæl ord pr artikel ----
+
+word_count_all <- words_clean_all %>%
+  count(document, word, sort = TRUE)
+
+
+# ---- Beregn TF-IDF ----
+
+tfidf_words <- word_count_all %>%
+  bind_tf_idf(word, document, n)
+
+
+# ---- Top TF-IDF ord ----
+
+top_tfidf <- tfidf_words %>%
+  group_by(document) %>%
+  slice_max(tf_idf, n = 15) %>%
+  ungroup()
+
+
+# ---- Plot TF-IDF ----
+
+top_tfidf %>%
+  mutate(word = reorder_within(word, tf_idf, document)) %>%
+  ggplot(aes(tf_idf, word, fill = document)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ document, scales = "free") +
+  scale_y_reordered() +
+  labs(
+    title = "Ord der er mest karakteristiske for FOX og BBC",
+    x = "TF-IDF",
+    y = "Ord"
+  )
+
+
+
+# ============================================================
+# SAMLEDE TABELLER TIL FORTOLKNING
+# ============================================================
+
+# ---- Samlet topic-topord ----
+
+all_topic_terms <- bind_rows(
+  fox_top_terms %>% mutate(article = "FOX"),
+  bbc_top_terms %>% mutate(article = "BBC")
+)
+
+
+# ---- Se samlet topic-tabel ----
+
+all_topic_terms
+
+
+# ---- Samlet hovedtopic pr side ----
+
+all_main_topics <- bind_rows(
+  fox_main_topic %>% mutate(article = "FOX"),
+  bbc_main_topic %>% mutate(article = "BBC")
+)
+
+
+# ---- Se hovedtopic pr side ----
+
+all_main_topics
+
+# ---- Saml topord fra FOX og BBC ----
+
+all_top_terms <- bind_rows(
+  fox_top_terms %>% mutate(article = "FOX"),
+  bbc_top_terms %>% mutate(article = "BBC")
+)
+
+
+# ---- Plot FOX og BBC topics i samme billede ----
+
+all_top_terms %>%
+  mutate(
+    topic_label = paste(article, "Topic", topic),
+    term = reorder_within(term, beta, topic_label)
+  ) %>%
+  ggplot(aes(x = beta, y = term, fill = article)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic_label, scales = "free_y", ncol = 2) +
+  scale_y_reordered() +
+  labs(
+    title = "Topord i hvert topic - FOX og BBC",
+    x = "Beta",
+    y = "Ord"
+  )
+save.image("stopwords")

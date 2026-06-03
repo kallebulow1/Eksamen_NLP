@@ -1,0 +1,568 @@
+# ---- Importer pakker ----
+
+import pandas as pd
+
+from langchain_ollama.llms import OllamaLLM
+from langchain_core.prompts import ChatPromptTemplate
+
+from vektor_home import retriever, df, vector_store
+
+
+# ---- Kontrol ----
+
+print("MAIN KØRER")
+print("Antal anmeldelser:", len(df))
+print("Kolonner:", df.columns)
+
+
+# ---- Tjek nødvendige kolonner ----
+
+required_cols = [
+    "rating_clean",
+    "rating_sentiment_label",
+    "rating_sentiment_score",
+    "rating_group",
+    "sentida_score",
+    "sentida_label",
+    "gender",
+    "weekday",
+    "month",
+    "year_month",
+    "text_length"
+]
+
+missing_cols = [col for col in required_cols if col not in df.columns]
+
+if len(missing_cols) > 0:
+    
+    print("FEJL: Disse kolonner mangler:")
+    print(missing_cols)
+    
+    raise ValueError("Kør vektor_home.py igen. Din df er ikke bygget korrekt.")
+
+
+# ---- Vælg model ----
+
+model = OllamaLLM(model="llama3:latest")
+
+
+# ---- Prompt template ----
+
+template = """
+Du er dataanalytiker.
+
+Du analyserer Trustpilot-anmeldelser om Home.
+
+Du må kun bruge de anmeldelser, der står nedenfor.
+Du må ikke opfinde noget.
+
+Hver anmeldelse kan have metadata som:
+rating, dato, ugedag, måned, navn, titel, fornavn, estimeret køn, ratingbaseret sentiment og Sentida-score.
+
+Køn er kun estimeret ud fra fornavn og kan derfor være usikkert.
+
+Ratingbaseret sentiment:
+1-2 = negativ
+3 = neutral
+4-5 = positiv
+
+Sentida-score er lavet ud fra selve teksten.
+
+Relevante anmeldelser:
+{reviews}
+
+Spørgsmål:
+{question}
+
+Svar på dansk:
+"""
+
+prompt = ChatPromptTemplate.from_template(template)
+
+chain = prompt | model
+
+
+# ---- Chat loop ----
+
+while True:
+    
+    print("\n-------------------------------")
+    
+    question = input("Stil et spørgsmål om Home-anmeldelserne (q for at stoppe): ")
+    
+    if question == "q":
+        print("Chatbot stoppet.")
+        break
+    
+    
+    question_lower = question.lower()
+    
+    
+    # ---- Antal ----
+    
+    if "hvor mange anmeldelser" in question_lower:
+        
+        print("\nSvar:")
+        print("Antal anmeldelser i datasættet:", len(df))
+        
+        continue
+    
+    
+    # ---- Køn ----
+    
+    if "hvor mange kvinder" in question_lower:
+        
+        print("\nSvar:")
+        print("Antal anmeldelser estimeret som kvinder:", (df["gender"] == "kvinde").sum())
+        print("Bemærk: Køn er estimeret ud fra fornavn.")
+        
+        continue
+    
+    
+    if "hvor mange mænd" in question_lower or "hvor mange maend" in question_lower:
+        
+        print("\nSvar:")
+        print("Antal anmeldelser estimeret som mænd:", (df["gender"] == "mand").sum())
+        print("Bemærk: Køn er estimeret ud fra fornavn.")
+        
+        continue
+    
+    
+    if "kønsfordeling" in question_lower or "koensfordeling" in question_lower:
+        
+        print("\nSvar:")
+        print(df["gender"].value_counts())
+        print("\nBemærk: Køn er estimeret ud fra fornavn.")
+        
+        continue
+    
+    
+    # ---- Rating ----
+    
+    if "gennemsnitlig rating" in question_lower:
+        
+        print("\nSvar:")
+        print("Gennemsnitlig rating:", round(df["rating_clean"].mean(), 2))
+        
+        continue
+    
+    
+    if "ratingfordeling" in question_lower or "rating fordeling" in question_lower:
+        
+        print("\nSvar:")
+        print(df["rating_clean"].value_counts().sort_index())
+        
+        continue
+    
+    
+    if "ratinggruppe" in question_lower or "rating gruppe" in question_lower:
+        
+        print("\nSvar:")
+        print(df["rating_group"].value_counts())
+        
+        continue
+    
+    
+    if "rating fordelt på køn" in question_lower or "rating fordelt på koen" in question_lower:
+        
+        print("\nSvar:")
+        print(df.groupby("gender")["rating_clean"].mean().round(2))
+        print("\nBemærk: Køn er estimeret ud fra fornavn.")
+        
+        continue
+    
+    
+    # ---- Sentiment ----
+    
+    if "ratingbaseret sentiment" in question_lower:
+        
+        print("\nSvar:")
+        print(df["rating_sentiment_label"].value_counts())
+        
+        continue
+    
+    
+    if "sentida fordeling" in question_lower or "sentidafordeling" in question_lower:
+        
+        print("\nSvar:")
+        print(df["sentida_label"].value_counts())
+        
+        continue
+    
+    
+    if "sentimentfordeling" in question_lower or "sentiment fordeling" in question_lower:
+        
+        print("\nSvar:")
+        
+        print("Ratingbaseret sentiment:")
+        print(df["rating_sentiment_label"].value_counts())
+        
+        print("\nSentida sentiment:")
+        print(df["sentida_label"].value_counts())
+        
+        continue
+    
+    
+    if "sentiment i procent" in question_lower:
+        
+        print("\nSvar:")
+        
+        print("Ratingbaseret sentiment i procent:")
+        print(round(df["rating_sentiment_label"].value_counts(normalize=True) * 100, 1))
+        
+        print("\nSentida sentiment i procent:")
+        print(round(df["sentida_label"].value_counts(normalize=True) * 100, 1))
+        
+        continue
+    
+    
+    if "gennemsnitlig sentida" in question_lower:
+        
+        print("\nSvar:")
+        print("Gennemsnitlig Sentida-score:", round(df["sentida_score"].mean(), 3))
+        
+        continue
+    
+    
+    if "sentiment fordelt på køn" in question_lower or "sentiment fordelt på koen" in question_lower:
+        
+        print("\nSvar:")
+        
+        print("Ratingbaseret sentiment fordelt på køn:")
+        print(pd.crosstab(df["gender"], df["rating_sentiment_label"]))
+        
+        print("\nSentida sentiment fordelt på køn:")
+        print(pd.crosstab(df["gender"], df["sentida_label"]))
+        
+        print("\nBemærk: Køn er estimeret ud fra fornavn.")
+        
+        continue
+    
+    
+    if "sentida fordelt på rating" in question_lower:
+        
+        print("\nSvar:")
+        print(df.groupby("rating_clean")["sentida_score"].mean().round(3))
+        
+        continue
+    
+    
+    if "gennemsnitlig tekstlængde" in question_lower or "gennemsnitlig tekstlaengde" in question_lower:
+        
+        print("\nSvar:")
+        print(df.groupby("rating_sentiment_label")["text_length"].mean().round(0))
+        
+        continue
+    
+    
+    # ---- Ugedag og måned ----
+    
+    if "ugedag" in question_lower:
+        
+        print("\nSvar:")
+        
+        print("Antal anmeldelser pr. ugedag:")
+        print(df["weekday"].value_counts())
+        
+        print("\nRatingbaseret sentiment fordelt på ugedag:")
+        print(pd.crosstab(df["weekday"], df["rating_sentiment_label"]))
+        
+        print("\nAndel sentiment pr. ugedag i procent:")
+        tabel = pd.crosstab(
+            df["weekday"],
+            df["rating_sentiment_label"],
+            normalize="index"
+        ) * 100
+        
+        print(round(tabel, 1))
+        
+        continue
+    
+    
+    if "måned" in question_lower or "måneder" in question_lower or "maaned" in question_lower or "maaneder" in question_lower:
+        
+        print("\nSvar:")
+        
+        print("Antal anmeldelser pr. måned:")
+        print(df["month"].value_counts())
+        
+        print("\nRatingbaseret sentiment fordelt på måned:")
+        print(pd.crosstab(df["month"], df["rating_sentiment_label"]))
+        
+        print("\nAndel sentiment pr. måned i procent:")
+        tabel = pd.crosstab(
+            df["month"],
+            df["rating_sentiment_label"],
+            normalize="index"
+        ) * 100
+        
+        print(round(tabel, 1))
+        
+        continue
+    
+    
+    if "mandag vs fredag" in question_lower or "er folk mere negative mandag end fredag" in question_lower:
+        
+        mf = df[df["weekday"].isin(["mandag", "fredag"])].copy()
+        
+        antal = pd.crosstab(
+            mf["weekday"],
+            mf["rating_sentiment_label"]
+        )
+        
+        procent = pd.crosstab(
+            mf["weekday"],
+            mf["rating_sentiment_label"],
+            normalize="index"
+        ) * 100
+        
+        print("\nSvar:")
+        print("Antal anmeldelser:")
+        print(antal)
+        
+        print("\nProcentfordeling:")
+        print(round(procent, 1))
+        
+        if "negativ" in procent.columns:
+            
+            mandag_negativ = procent.loc["mandag", "negativ"] if "mandag" in procent.index else None
+            fredag_negativ = procent.loc["fredag", "negativ"] if "fredag" in procent.index else None
+            
+            if mandag_negativ is not None and fredag_negativ is not None:
+                
+                print("\nFortolkning:")
+                print("Mandag negativ andel:", round(mandag_negativ, 1), "%")
+                print("Fredag negativ andel:", round(fredag_negativ, 1), "%")
+                
+                if mandag_negativ > fredag_negativ:
+                    print("I dette datasæt er anmeldelserne mere negative om mandagen end om fredagen.")
+                
+                elif mandag_negativ < fredag_negativ:
+                    print("I dette datasæt er anmeldelserne mere negative om fredagen end om mandagen.")
+                
+                else:
+                    print("I dette datasæt er der ingen forskel mellem mandag og fredag.")
+        
+        continue
+    
+    
+    if "over tid" in question_lower or "udvikling over tid" in question_lower:
+        
+        print("\nSvar:")
+        
+        tabel = df.groupby("year_month")["sentida_score"].mean().round(3)
+        
+        print("Gennemsnitlig Sentida-score pr. måned:")
+        print(tabel)
+        
+        continue
+    
+    
+    # ---- Kønsfiltreret RAG ----
+    
+    if question_lower.startswith("kvinder:"):
+        
+        clean_question = question.replace("kvinder:", "").strip()
+        
+        active_retriever = vector_store.as_retriever(
+            search_kwargs={
+                "k": 5,
+                "filter": {"gender": "kvinde"}
+            }
+        )
+        
+        reviews = active_retriever.invoke(clean_question)
+        
+        result = chain.invoke({
+            "reviews": reviews,
+            "question": clean_question
+        })
+        
+        print("\nSvar:")
+        print(result)
+        
+        continue
+    
+    
+    if question_lower.startswith("mænd:") or question_lower.startswith("maend:"):
+        
+        clean_question = question.replace("mænd:", "").replace("maend:", "").strip()
+        
+        active_retriever = vector_store.as_retriever(
+            search_kwargs={
+                "k": 5,
+                "filter": {"gender": "mand"}
+            }
+        )
+        
+        reviews = active_retriever.invoke(clean_question)
+        
+        result = chain.invoke({
+            "reviews": reviews,
+            "question": clean_question
+        })
+        
+        print("\nSvar:")
+        print(result)
+        
+        continue
+    
+    
+    # ---- Sentimentfiltreret RAG ----
+    
+    if question_lower.startswith("positive:") or question_lower.startswith("positiv:"):
+        
+        clean_question = question.replace("positive:", "").replace("positiv:", "").strip()
+        
+        active_retriever = vector_store.as_retriever(
+            search_kwargs={
+                "k": 5,
+                "filter": {"rating_sentiment_label": "positiv"}
+            }
+        )
+        
+        reviews = active_retriever.invoke(clean_question)
+        
+        result = chain.invoke({
+            "reviews": reviews,
+            "question": clean_question
+        })
+        
+        print("\nSvar:")
+        print(result)
+        
+        continue
+    
+    
+    if question_lower.startswith("negative:") or question_lower.startswith("negativ:"):
+        
+        clean_question = question.replace("negative:", "").replace("negativ:", "").strip()
+        
+        active_retriever = vector_store.as_retriever(
+            search_kwargs={
+                "k": 5,
+                "filter": {"rating_sentiment_label": "negativ"}
+            }
+        )
+        
+        reviews = active_retriever.invoke(clean_question)
+        
+        result = chain.invoke({
+            "reviews": reviews,
+            "question": clean_question
+        })
+        
+        print("\nSvar:")
+        print(result)
+        
+        continue
+    
+    
+    if question_lower.startswith("sentida positiv:"):
+        
+        clean_question = question.replace("sentida positiv:", "").strip()
+        
+        active_retriever = vector_store.as_retriever(
+            search_kwargs={
+                "k": 5,
+                "filter": {"sentida_label": "positiv"}
+            }
+        )
+        
+        reviews = active_retriever.invoke(clean_question)
+        
+        result = chain.invoke({
+            "reviews": reviews,
+            "question": clean_question
+        })
+        
+        print("\nSvar:")
+        print(result)
+        
+        continue
+    
+    
+    if question_lower.startswith("sentida negativ:"):
+        
+        clean_question = question.replace("sentida negativ:", "").strip()
+        
+        active_retriever = vector_store.as_retriever(
+            search_kwargs={
+                "k": 5,
+                "filter": {"sentida_label": "negativ"}
+            }
+        )
+        
+        reviews = active_retriever.invoke(clean_question)
+        
+        result = chain.invoke({
+            "reviews": reviews,
+            "question": clean_question
+        })
+        
+        print("\nSvar:")
+        print(result)
+        
+        continue
+    
+    # ---- Sentida score over 2 ----
+    
+    if ("over 2" in question_lower and ("sentiment" in question_lower or "sentida" in question_lower)):
+     
+     over_2 = df[df["sentida_score"] > 2].copy()
+     
+     print("\nSvar:")
+     print("Antal anmeldelser med Sentida-score over 2:", len(over_2))
+     
+     if len(over_2) > 0:
+         
+         print("\nTop 10 højeste Sentida-scores:")
+         print(
+             over_2[
+                 ["name", "rating_clean", "sentida_score", "sentida_label", "content"]
+             ].sort_values("sentida_score", ascending=False).head(10)
+         )
+     
+     else:
+         
+         print("Der er ingen anmeldelser med Sentida-score over 2.")
+     
+     continue
+ 
+    # ---- Højeste og laveste Sentida-score ---
+    
+    if "højeste og laveste" in question_lower or "max og min sentida" in question_lower:
+     
+     highest = df.sort_values("sentida_score", ascending=False).head(1)
+     lowest = df.sort_values("sentida_score", ascending=True).head(1)
+     
+     result = pd.concat([highest, lowest])
+     
+     print("\nSvar:")
+     print("Højeste og laveste Sentida-score:")
+     
+     for index, row in result.iterrows():
+         
+         print("\n--------------------")
+         print("Navn:", row["name"])
+         print("Rating:", row["rating_clean"])
+         print("Dato:", row["published"])
+         print("Måned:", row["month"])
+         print("Ugedag:", row["weekday"])
+         print("Sentida-score:", round(row["sentida_score"], 3))
+         print("Sentida-label:", row["sentida_label"])
+         print("Anmeldelse:", row["content"])
+     
+     continue
+    
+    # ---- Almindelig RAG ----
+    
+    reviews = retriever.invoke(question)
+    
+    result = chain.invoke({
+        "reviews": reviews,
+        "question": question
+    })
+    
+    print("\nSvar:")
+    print(result)

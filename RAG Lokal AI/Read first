@@ -1,0 +1,73 @@
+READ FIRST!
+
+ 
+
+=====================================================
+
+ELGIGANTEN VS POWER — NLP ANALYSE
+
+=====================================================
+
+ 
+
+INSTALLER FØRST (kør i Anaconda Prompt):
+
+pip install pyarrow sentida spacy gender-guesser
+
+pip install langchain langchain-ollama langchain-chroma
+
+pip install chromadb tqdm
+
+python -m spacy download da_core_news_sm
+
+ 
+
+DOWNLOAD OLLAMA:
+
+1. Gå til ollama.com og download
+
+2. Åbn Anaconda Prompt og kør:
+
+   ollama pull llama3.2
+
+   ollama pull nomic-embed-text
+
+ 
+
+RET STIEN I ALLE .py FILER:
+
+Find alle steder der står:
+
+C:\Users\mehdi\Documents\...
+
+Ret "mehdi" til dit eget brugernavn
+
+ 
+
+RÆKKEFØLGE:
+
+1. Læg alle filer i samme mappe
+
+2. Kør analyse_elg_power.py i Spyder (plots)
+
+3. Kør i Anaconda Prompt:
+
+   cd "din\mappe\sti"
+
+   python vector_elg_power.py  ← bygger database (30 min!)
+
+4. Kør i Anaconda Prompt:
+
+   python chatbot_elg_power.py ← start chatbot
+
+ 
+
+VIGTIGT:
+
+- vector_elg_power.py tager 20-30 minutter
+
+- Sørg for Ollama kører i baggrunden inden chatbot
+
+- elg_power_metadata.csv skal ligge i samme mappe
+
+=====================================================
